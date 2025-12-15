@@ -55,6 +55,11 @@
   }
   body {
     @apply bg-background text-foreground;
+    min-height: max(884px, 100dvh);
+  }
+  
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 20px);
   }
 }
 

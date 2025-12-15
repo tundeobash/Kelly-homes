@@ -27,9 +27,14 @@ export default function Home() {
           <p className="text-xl text-muted-foreground mb-8">
             Upload a photo of your room and get personalized furniture recommendations
           </p>
-          <Link href="/auth">
-            <Button size="lg">Start Designing</Button>
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-4 items-center">
+            <Link href="/auth">
+              <Button size="lg">Start Designing</Button>
+            </Link>
+            <Link href="/_temp/stitch/welcome">
+              <Button size="lg" variant="outline">Open Temp Stitch Page</Button>
+            </Link>
+          </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-8 mt-16">
@@ -79,3 +84,4 @@ export default function Home() {
     </div>
   )
 }
+

@@ -34,7 +34,7 @@ export default async function ProjectPage({
   })
 
   if (!project || project.userId !== session.user.id) {
-    redirect("/dashboard")
+    redirect("/profile/me")
   }
 
   // Get user preferences

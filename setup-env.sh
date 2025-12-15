@@ -33,7 +33,7 @@ cat > .env << EOF
 DATABASE_URL="postgresql://user:password@localhost:5432/kellyhomes?schema=public"
 
 # NextAuth
-NEXTAUTH_URL="http://localhost:3000"
+NEXTAUTH_URL="http://localhost:3001"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET}"
 
 # Cloudinary (optional - can use local storage for MVP)

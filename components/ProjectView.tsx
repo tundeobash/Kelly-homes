@@ -61,31 +61,14 @@ export default function ProjectView({
   const latestRecommendation = recommendations[0]
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="border-b bg-white">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <Link href="/dashboard">
-            <h1 className="text-2xl font-bold">Kelly Homes</h1>
-          </Link>
-          <div className="flex gap-4">
-            <Link href="/styles">
-              <Button variant="ghost">Styles</Button>
-            </Link>
-            <Link href="/dashboard">
-              <Button variant="ghost">Back to Dashboard</Button>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold mb-2">{project.name}</h2>
-          <p className="text-muted-foreground">
-            {project.roomType} • {project.length}ft × {project.width}ft ×{" "}
-            {project.height}ft
-          </p>
-        </div>
+    <>
+      <div className="mb-8">
+        <h2 className="text-3xl font-bold mb-2">{project.name}</h2>
+        <p className="text-muted-foreground">
+          {project.roomType} • {project.length}ft × {project.width}ft ×{" "}
+          {project.height}ft
+        </p>
+      </div>
 
         <div className="grid lg:grid-cols-2 gap-8">
           <div>
@@ -233,8 +216,7 @@ export default function ProjectView({
             )}
           </div>
         </div>
-      </main>
-    </div>
+    </>
   )
 }
 

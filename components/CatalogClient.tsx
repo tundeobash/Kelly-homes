@@ -26,14 +26,47 @@ export default function CatalogClient({ items, sellers }: CatalogClientProps) {
   const [styleFilter, setStyleFilter] = useState(searchParams.get("style") || "")
   const [sellerFilter, setSellerFilter] = useState(searchParams.get("seller") || "")
   const [budgetFilter, setBudgetFilter] = useState(searchParams.get("budget") || "")
+  const [categoryFilter, setCategoryFilter] = useState(searchParams.get("category") || "")
 
   const applyFilters = () => {
     const params = new URLSearchParams()
     if (styleFilter && styleFilter !== "all") params.set("style", styleFilter)
     if (sellerFilter && sellerFilter !== "all") params.set("seller", sellerFilter)
-    if (budgetFilter) params.set("budget", budgetFilter)
+    if (budgetFilter && budgetFilter !== "all") params.set("budget", budgetFilter)
+    if (categoryFilter && categoryFilter !== "all") params.set("category", categoryFilter)
     router.push(`/catalog?${params.toString()}`)
   }
+
+  const budgetRanges = [
+    { value: "all", label: "All Budgets" },
+    { value: "500", label: "$1 – $500" },
+    { value: "1000", label: "$501 – $1,000" },
+    { value: "2000", label: "$1,001 – $2,000" },
+    { value: "5000", label: "$2,001 – $5,000" },
+    { value: "10000", label: "$5,001 – $10,000" },
+    { value: "10001", label: "$10,001+" },
+  ]
+
+  const categories = [
+    "Sofa / Sectional",
+    "Armchair",
+    "Coffee Table",
+    "Side Table",
+    "TV Stand / Media Console",
+    "Dining Table",
+    "Dining Chair",
+    "Bed Frame",
+    "Mattress",
+    "Nightstand",
+    "Dresser / Chest",
+    "Desk",
+    "Office Chair",
+    "Bookshelf / Storage",
+    "Rug",
+    "Lighting (Floor / Table / Ceiling)",
+    "Curtains / Blinds",
+    "Wall Art / Decor",
+  ]
 
   const filteredItems = items.filter((item) => {
     if (search && !item.name.toLowerCase().includes(search.toLowerCase())) {
@@ -46,7 +79,7 @@ export default function CatalogClient({ items, sellers }: CatalogClientProps) {
     <div>
       <div className="mb-8">
         <h2 className="text-3xl font-bold mb-6">Furniture Catalog</h2>
-        <div className="grid md:grid-cols-4 gap-4 mb-4">
+        <div className="grid md:grid-cols-5 gap-4 mb-4">
           <Input
             placeholder="Search items..."
             value={search}
@@ -78,12 +111,31 @@ export default function CatalogClient({ items, sellers }: CatalogClientProps) {
               ))}
             </SelectContent>
           </Select>
-          <Input
-            type="number"
-            placeholder="Max Budget"
-            value={budgetFilter}
-            onChange={(e) => setBudgetFilter(e.target.value)}
-          />
+          <Select value={budgetFilter} onValueChange={setBudgetFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Budget" />
+            </SelectTrigger>
+            <SelectContent>
+              {budgetRanges.map((range) => (
+                <SelectItem key={range.value} value={range.value}>
+                  {range.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              {categories.map((category) => (
+                <SelectItem key={category} value={category}>
+                  {category}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <Button onClick={applyFilters}>Apply Filters</Button>
       </div>

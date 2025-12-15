@@ -3,8 +3,6 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import CheckoutClient from "@/components/CheckoutClient"
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
 
 export default async function CheckoutPage() {
   const session = await getServerSession(authOptions)
@@ -39,25 +37,6 @@ export default async function CheckoutPage() {
     })
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="border-b bg-white">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <Link href="/dashboard">
-            <h1 className="text-2xl font-bold">Kelly Homes</h1>
-          </Link>
-          <div className="flex gap-4">
-            <Link href="/catalog">
-              <Button variant="ghost">Continue Shopping</Button>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
-        <CheckoutClient cart={cart} />
-      </main>
-    </div>
-  )
+  return <CheckoutClient cart={cart} />
 }
 
