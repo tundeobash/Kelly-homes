@@ -29,8 +29,44 @@ export default function RoomPhotoViewer({
   const [imageError, setImageError] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Handle missing or invalid imageUrl
+  if (!imageUrl || imageUrl.trim() === "") {
+    return (
+      <div className={`bg-muted flex items-center justify-center rounded ${className}`}>
+        <div className="text-center p-4">
+          <p className="text-sm text-muted-foreground">No image</p>
+          {process.env.NODE_ENV === "development" && (
+            <p className="text-xs text-muted-foreground mt-1">Missing imageUrl</p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Handle blob URLs (temporary, non-persistent URLs from old uploads)
   const isBlobUrl = imageUrl.startsWith("blob:")
+  if (isBlobUrl) {
+    return (
+      <div className={`bg-muted flex items-center justify-center rounded ${className}`}>
+        <div className="text-center p-4">
+          <p className="text-sm text-muted-foreground">Image unavailable</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Please re-upload this project's image
+          </p>
+          {process.env.NODE_ENV === "development" && (
+            <p className="text-xs text-red-500 mt-1">Blob URL detected: {imageUrl}</p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   const displayUrl = thumbnailUrl || imageUrl
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[RoomPhotoViewer] Image URL:", imageUrl)
+    console.log("[RoomPhotoViewer] Display URL:", displayUrl)
+  }
 
   const handleImageClick = () => {
     setIsOpen(true)
@@ -50,25 +86,16 @@ export default function RoomPhotoViewer({
         className={`relative cursor-pointer hover:opacity-90 transition-opacity ${className}`}
         onClick={handleImageClick}
       >
-        {isBlobUrl ? (
-          <img
+        <div className="relative w-full h-full">
+          <Image
             src={displayUrl}
             alt={alt}
-            className="w-full h-full object-cover rounded"
+            fill
+            className="object-cover rounded"
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
             onError={() => setImageError(true)}
           />
-        ) : (
-          <div className="relative w-full h-full">
-            <Image
-              src={displayUrl}
-              alt={alt}
-              fill
-              className="object-cover rounded"
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-              onError={() => setImageError(true)}
-            />
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Modal/Dialog */}
@@ -83,45 +110,33 @@ export default function RoomPhotoViewer({
               <div className="flex flex-col items-center gap-4">
                 <AlertCircle className="h-12 w-12 text-muted-foreground" />
                 <p className="text-muted-foreground">Image failed to load</p>
+                {process.env.NODE_ENV === "development" && (
+                  <p className="text-xs text-muted-foreground">URL: {imageUrl}</p>
+                )}
                 <Button onClick={handleRetry} variant="outline">
                   Retry
                 </Button>
               </div>
             ) : (
-              <>
-                {isBlobUrl ? (
-                  <img
-                    src={imageUrl}
-                    alt={alt}
-                    className="max-w-full max-h-[80vh] object-contain rounded"
-                    onLoad={() => setIsLoading(false)}
-                    onError={() => {
-                      setImageError(true)
-                      setIsLoading(false)
-                    }}
-                  />
-                ) : (
-                  <div className="relative w-full h-full min-h-[400px] flex items-center justify-center">
-                    {isLoading && (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <p className="text-muted-foreground">Loading...</p>
-                      </div>
-                    )}
-                    <Image
-                      src={imageUrl}
-                      alt={alt}
-                      fill
-                      className="object-contain rounded"
-                      sizes="(max-width: 1920px) 100vw, 1920px"
-                      onLoad={() => setIsLoading(false)}
-                      onError={() => {
-                        setImageError(true)
-                        setIsLoading(false)
-                      }}
-                    />
+              <div className="relative w-full h-full min-h-[400px] flex items-center justify-center">
+                {isLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <p className="text-muted-foreground">Loading...</p>
                   </div>
                 )}
-              </>
+                <Image
+                  src={imageUrl}
+                  alt={alt}
+                  fill
+                  className="object-contain rounded"
+                  sizes="(max-width: 1920px) 100vw, 1920px"
+                  onLoad={() => setIsLoading(false)}
+                  onError={() => {
+                    setImageError(true)
+                    setIsLoading(false)
+                  }}
+                />
+              </div>
             )}
           </div>
         </DialogContent>

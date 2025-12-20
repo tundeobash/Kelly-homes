@@ -4,10 +4,10 @@ import { prisma } from "@/lib/prisma"
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Plus } from "lucide-react"
-import RoomPhotoViewer from "@/components/RoomPhotoViewer"
 import ProfileHeaderClient from "@/components/ProfileHeaderClient"
+import ProjectCard from "@/components/ProjectCard"
 
 async function getProfileData(username: string, currentUserId?: string) {
   // For now, if username is "me", use current user
@@ -119,30 +119,11 @@ export default async function ProfilePage({
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {profile.projects.map((project) => (
-                <Link key={project.id} href={`/project/${project.id}`}>
-                  <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-                    <div className="aspect-video bg-gray-200 rounded-t-lg overflow-hidden">
-                      <RoomPhotoViewer
-                        imageUrl={project.imageUrl}
-                        alt={project.name}
-                        className="w-full h-full"
-                      />
-                    </div>
-                    <CardHeader>
-                      <CardTitle className="text-lg">{project.name}</CardTitle>
-                      <CardDescription>
-                        {project.roomType} • {project.length}ft × {project.width}ft
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {project.recommendations.length > 0 && project.recommendations[0]?.items && (
-                        <p className="text-sm text-muted-foreground">
-                          {project.recommendations[0].items.length} items recommended
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Link>
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  isOwnProfile={params.username === "me"}
+                />
               ))}
             </div>
           )}

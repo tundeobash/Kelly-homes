@@ -21,6 +21,14 @@ export async function POST(request: Request) {
       )
     }
 
+    // Block blob URLs - never save them to database
+    if (imageUrl.startsWith("blob:")) {
+      return NextResponse.json(
+        { error: "Invalid image URL. Please upload the image again." },
+        { status: 400 }
+      )
+    }
+
     const project = await prisma.roomProject.create({
       data: {
         userId: session.user.id,
@@ -32,6 +40,11 @@ export async function POST(request: Request) {
         imageUrl,
       },
     })
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[API PROJECTS] Created project:", project.id)
+      console.log("[API PROJECTS] Stored imageUrl:", project.imageUrl)
+    }
 
     return NextResponse.json(project, { status: 201 })
   } catch (error) {

@@ -17,6 +17,7 @@ import {
 export default function NewProjectPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     roomType: "",
@@ -31,17 +32,44 @@ export default function NewProjectPage() {
     setLoading(true)
 
     try {
-      // Upload image first (mock - in production, use Cloudinary)
+      // Upload image first - get persistent URL
       let imageUrl = ""
       if (formData.image) {
         const formDataUpload = new FormData()
         formDataUpload.append("file", formData.image)
         
-        // For MVP, we'll use a mock URL
-        // TODO: Replace with Cloudinary upload
-        imageUrl = URL.createObjectURL(formData.image)
+        const uploadRes = await fetch("/api/upload", {
+          method: "POST",
+          body: formDataUpload,
+        })
+
+        if (!uploadRes.ok) {
+          const errorData = await uploadRes.json().catch(() => ({}))
+          throw new Error(errorData.error || "Failed to upload image")
+        }
+
+        const uploadData = await uploadRes.json()
+        imageUrl = uploadData.url
+
+        // Validate we got a persistent URL, not a blob
+        if (!imageUrl || imageUrl.startsWith("blob:")) {
+          throw new Error("Invalid image URL received. Please try again.")
+        }
+
+        if (process.env.NODE_ENV === "development") {
+          console.log("[PROJECT CREATE] Uploaded image URL:", imageUrl)
+        }
+      } else {
+        throw new Error("Please select an image to upload")
       }
 
+      // Clean up preview blob URL
+      if (previewSrc) {
+        URL.revokeObjectURL(previewSrc)
+        setPreviewSrc(null)
+      }
+
+      // Create project with persistent URL
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -51,19 +79,30 @@ export default function NewProjectPage() {
           length: parseFloat(formData.length),
           width: parseFloat(formData.width),
           height: parseFloat(formData.height),
-          imageUrl, // In production, this would be the Cloudinary URL
+          imageUrl, // Persistent URL from /api/upload
         }),
       })
 
       if (!res.ok) {
-        throw new Error("Failed to create project")
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || "Failed to create project")
       }
 
       const project = await res.json()
+      
+      if (process.env.NODE_ENV === "development") {
+        console.log("[PROJECT CREATE] Created project:", project.id)
+        console.log("[PROJECT CREATE] Stored imageUrl:", project.imageUrl)
+        // Verify no blob URL was stored
+        if (project.imageUrl?.startsWith("blob:")) {
+          console.error("[PROJECT CREATE] ERROR: Blob URL was stored in DB!")
+        }
+      }
+
       router.push(`/project/${project.id}`)
     } catch (error) {
       console.error("Error creating project:", error)
-      alert("Failed to create project. Please try again.")
+      alert(error instanceof Error ? error.message : "Failed to create project. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -110,6 +149,9 @@ export default function NewProjectPage() {
                       return
                     }
                     setFormData({ ...formData, image: file })
+                    // Create preview blob URL (temporary, not persisted)
+                    const preview = URL.createObjectURL(file)
+                    setPreviewSrc(preview)
                   }
                 }}
                 required
@@ -118,9 +160,20 @@ export default function NewProjectPage() {
                 Accepted: JPG, JPEG, PNG, PDF
               </p>
               {formData.image && (
-                <p className="text-sm text-muted-foreground">
-                  Selected: {formData.image.name}
-                </p>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Selected: {formData.image.name}
+                  </p>
+                  {previewSrc && (
+                    <div className="relative w-full h-48 rounded-lg overflow-hidden border">
+                      <img
+                        src={previewSrc}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 

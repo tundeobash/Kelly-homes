@@ -37,6 +37,11 @@ export default async function ProjectPage({
     redirect("/profile/me")
   }
 
+  if (process.env.NODE_ENV === "development") {
+    console.log("[PROJECT DETAIL] Project ID:", project.id)
+    console.log("[PROJECT DETAIL] Image URL:", project.imageUrl)
+  }
+
   // Get user preferences
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
