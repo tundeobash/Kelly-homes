@@ -51,7 +51,7 @@ export default function RoomPhotoViewer({
         <div className="text-center p-4">
           <p className="text-sm text-muted-foreground">Image unavailable</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Please re-upload this project's image
+            Please re-upload this project&apos;s image
           </p>
           {process.env.NODE_ENV === "development" && (
             <p className="text-xs text-red-500 mt-1">Blob URL detected: {imageUrl}</p>
