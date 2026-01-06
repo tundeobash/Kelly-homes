@@ -36,5 +36,7 @@ yarn-error.log*
 next-env.d.ts
 
 # prisma
-/prisma/migrations
+# Migrations must be tracked for Vercel deployment
+!prisma/migrations/
+!prisma/migrations/**
 
