@@ -1,0 +1,115 @@
+{
+  "roomSummary": {
+    "roomType": "living_room",
+    "lighting": "bright_natural_and_recessed",
+    "floor": "light_hardwood",
+    "walls": "white_with_molding"
+  },
+  "style": {
+    "name": "bohemian",
+    "keywords": [
+      "natural_textures",
+      "global_patterns",
+      "relaxed",
+      "eclectic",
+      "plants",
+      "warm",
+      "earthy",
+      "cozy"
+    ],
+    "avoid": [
+      "minimalist",
+      "modern_sleek",
+      "formal",
+      "overly_structured",
+      "cold_colors"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "cream",
+      "terracotta",
+      "olive_green",
+      "warm_beige"
+    ],
+    "accent": [
+      "mustard_yellow",
+      "rust",
+      "deep_teal",
+      "natural_wood_tones"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Low-slung, comfortable, relaxed silhouette with deep cushions",
+      "color": "Cream",
+      "material": "Linen",
+      "size": "large",
+      "placement": "Against the main wall facing the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Layered texture, global-inspired pattern, slightly distressed look",
+      "color": "Earthy tones, muted reds and oranges",
+      "material": "Jute and wool blend",
+      "size": "large",
+      "placement": "Centered in front of the sofa, covering most of the floor space",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Organic shape, handcrafted feel, low profile",
+      "color": "Natural wood",
+      "material": "Reclaimed wood",
+      "size": "medium",
+      "placement": "In front of the sofa, on the rug",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Rattan or woven, relaxed, inviting, with soft cushions",
+      "color": "Natural",
+      "material": "Rattan",
+      "size": "medium",
+      "placement": "Angled towards the sofa, near the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "plant",
+      "styleNotes": "Large, leafy, in a textured ceramic or terracotta pot",
+      "color": "Green",
+      "material": "Ceramic pot, live plant",
+      "size": "large",
+      "placement": "In the corner next to the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Textile wall hanging or framed abstract art with earthy tones and organic shapes",
+      "color": "Mixed earthy tones, warm",
+      "material": "Woven fabric or canvas",
+      "size": "large",
+      "placement": "Above the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Small, rustic, or carved wood, with a unique texture",
+      "color": "Dark wood",
+      "material": "Solid wood",
+      "size": "small",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "lighting",
+      "floor_material"
+    ],
+    "mustAddFurniture": true
+  }
+}

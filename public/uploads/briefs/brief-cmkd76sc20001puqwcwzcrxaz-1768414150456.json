@@ -1,0 +1,108 @@
+{
+  "roomSummary": {
+    "roomType": "Living Room",
+    "lighting": "Bright natural light from large window, recessed ceiling lights",
+    "floor": "Light tone hardwood planks",
+    "walls": "White walls with classic wainscoting and crown molding"
+  },
+  "style": {
+    "name": "Scandinavian",
+    "keywords": [
+      "minimalist",
+      "functional",
+      "natural materials",
+      "light colors",
+      "cozy",
+      "clean lines",
+      "hygge"
+    ],
+    "avoid": [
+      "ornate designs",
+      "heavy furniture",
+      "dark colors",
+      "cluttered spaces",
+      "excessive patterns",
+      "synthetic materials"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "White",
+      "Light Grey",
+      "Beige",
+      "Light Wood Tones"
+    ],
+    "accent": [
+      "Soft Green",
+      "Muted Blue",
+      "Charcoal Grey"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Minimalist, clean lines, low profile",
+      "color": "Light Grey",
+      "material": "Linen or textured fabric",
+      "size": "large",
+      "placement": "Against the wall opposite the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Simple, comfortable, perhaps with wooden frame details",
+      "color": "Off-white",
+      "material": "Fabric and light wood",
+      "size": "medium",
+      "placement": "Next to the sofa, facing the coffee table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Round or rectangular, simple design",
+      "color": "Light Wood",
+      "material": "Solid wood or wood veneer",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Soft, natural texture",
+      "color": "Cream or Light Beige",
+      "material": "Wool or Jute",
+      "size": "large",
+      "placement": "Under the sofa and coffee table, defining the seating area",
+      "mustBeVisible": true
+    },
+    {
+      "type": "plant",
+      "styleNotes": "Tall, leafy, in a simple pot",
+      "color": "Green",
+      "material": "Ceramic pot",
+      "size": "medium",
+      "placement": "In a corner near the window or next to the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Abstract or minimalist landscape, framed simply",
+      "color": "Muted tones, white, black",
+      "material": "Canvas, wood frame",
+      "size": "large",
+      "placement": "Centered on the main wall (opposite window)",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "lighting",
+      "floor material",
+      "wall color",
+      "wainscoting",
+      "crown molding"
+    ],
+    "mustAddFurniture": true
+  }
+}

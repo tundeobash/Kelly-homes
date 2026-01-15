@@ -1,0 +1,112 @@
+{
+  "roomSummary": {
+    "roomType": "Living Room",
+    "lighting": "Recessed ceiling lights, natural light from large window",
+    "floor": "Light hardwood",
+    "walls": "White with classic paneling and crown molding"
+  },
+  "style": {
+    "name": "Coastal",
+    "keywords": [
+      "airy",
+      "light",
+      "natural textures",
+      "relaxed",
+      "beach-inspired",
+      "serene"
+    ],
+    "avoid": [
+      "heavy fabrics",
+      "dark wood",
+      "ornate patterns",
+      "clutter",
+      "industrial elements"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "White",
+      "Light Blue",
+      "Sand Beige"
+    ],
+    "accent": [
+      "Navy Blue",
+      "Seafoam Green",
+      "Coral"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Slipcovered, relaxed silhouette",
+      "color": "Off-white",
+      "material": "Linen blend",
+      "size": "large",
+      "placement": "Against the long wall opposite the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Woven texture, comfortable",
+      "color": "Natural beige",
+      "material": "Rattan or wicker",
+      "size": "medium",
+      "placement": "Adjacent to the sofa, facing the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Simple, natural finish",
+      "color": "Light wood",
+      "material": "Reclaimed wood or light oak",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Natural fiber, textured",
+      "color": "Jute/natural",
+      "material": "Jute or sisal",
+      "size": "large",
+      "placement": "Under the sofa and coffee table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Simple, round",
+      "color": "White or light wood",
+      "material": "Painted wood or light oak",
+      "size": "small",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "lamp",
+      "styleNotes": "Table lamp with ceramic base",
+      "color": "Light blue/white",
+      "material": "Ceramic, linen shade",
+      "size": "medium",
+      "placement": "On the side table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Abstract seascape or beach scene",
+      "color": "Blues, greens, whites",
+      "material": "Canvas",
+      "size": "large",
+      "placement": "Centered on the long wall above the sofa",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "Walls (paneling, molding)",
+      "Ceiling (recessed lights)",
+      "Floor (hardwood)"
+    ],
+    "mustAddFurniture": true
+  }
+}

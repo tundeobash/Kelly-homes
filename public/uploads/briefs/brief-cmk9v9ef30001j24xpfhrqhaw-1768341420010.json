@@ -1,0 +1,112 @@
+{
+  "roomSummary": {
+    "roomType": "Living Room",
+    "lighting": "Bright natural light, recessed ceiling lights",
+    "floor": "Light hardwood",
+    "walls": "White with classic wainscoting"
+  },
+  "style": {
+    "name": "minimalist",
+    "keywords": [
+      "clean lines",
+      "uncluttered",
+      "functional",
+      "serene",
+      "simple",
+      "natural materials"
+    ],
+    "avoid": [
+      "ornate",
+      "excessive decoration",
+      "busy patterns",
+      "dark colors",
+      "heavy furniture"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "White",
+      "Light Grey",
+      "Natural Wood"
+    ],
+    "accent": [
+      "Muted Green",
+      "Black"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Low profile, clean lines, armless or subtle arms",
+      "color": "Light Grey",
+      "material": "Linen fabric",
+      "size": "medium",
+      "placement": "Centered on the main wall",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Geometric, simple form, open base",
+      "color": "White",
+      "material": "Wood or matte metal",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Subtle texture, no bold patterns",
+      "color": "Light Beige",
+      "material": "Wool or natural fiber",
+      "size": "large",
+      "placement": "Under the sofa and coffee table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Sculptural, minimalist design, comfortable",
+      "color": "Muted Green",
+      "material": "Fabric with light wood frame",
+      "size": "small",
+      "placement": "Corner opposite the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Simple, round, slender legs",
+      "color": "Black",
+      "material": "Metal",
+      "size": "small",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "plant",
+      "styleNotes": "Tall, slender, simple pot",
+      "color": "Green",
+      "material": "Ceramic pot",
+      "size": "medium",
+      "placement": "Corner near the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Abstract, subtle colors, large scale",
+      "color": "Muted tones, white, grey",
+      "material": "Canvas with thin frame",
+      "size": "large",
+      "placement": "Centered above the sofa",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "Walls (wainscoting details, color)",
+      "Ceiling (molding, recessed lights)",
+      "Floor (hardwood material, color)",
+      "Window structure"
+    ],
+    "mustAddFurniture": true
+  }
+}

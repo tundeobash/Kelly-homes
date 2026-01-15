@@ -1,0 +1,117 @@
+{
+  "roomSummary": {
+    "roomType": "Living Room",
+    "lighting": "Bright natural light, recessed ceiling lights",
+    "floor": "Light natural wood planks",
+    "walls": "White with classic wainscoting and molding"
+  },
+  "style": {
+    "name": "wabi-sabi",
+    "keywords": [
+      "imperfection",
+      "natural materials",
+      "simplicity",
+      "authenticity",
+      "earthy tones",
+      "muted",
+      "aged",
+      "texture",
+      "tranquility"
+    ],
+    "avoid": [
+      "overly polished",
+      "synthetic materials",
+      "bright primary colors",
+      "excessive ornamentation",
+      "symmetry",
+      "new/perfect items"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "Off-white",
+      "Light beige",
+      "Soft grey",
+      "Natural wood"
+    ],
+    "accent": [
+      "Terracotta",
+      "Muted olive green",
+      "Charcoal grey"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Low-profile, organic shape, comfortable, slightly distressed look",
+      "color": "Off-white",
+      "material": "Linen",
+      "size": "medium",
+      "placement": "Against the long wall opposite the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Irregular shape, raw finish, minimalist",
+      "color": "Natural wood",
+      "material": "Reclaimed wood",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Hand-knotted, subtle texture, irregular weave",
+      "color": "Light beige",
+      "material": "Jute",
+      "size": "large",
+      "placement": "Under the sofa and coffee table, centered in the seating area",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Relaxed, comfortable, simple lines",
+      "color": "Soft grey",
+      "material": "Washed linen",
+      "size": "medium",
+      "placement": "To the side of the sofa, facing the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Small, simple, raw finish",
+      "color": "Dark wood",
+      "material": "Solid wood",
+      "size": "small",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "plant",
+      "styleNotes": "Tall, leafy, in an unglazed pot with natural texture",
+      "color": "Green",
+      "material": "Ceramic pot",
+      "size": "large",
+      "placement": "In a corner near the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Abstract, textured, organic forms, unframed or simply framed",
+      "color": "Muted earth tones",
+      "material": "Canvas",
+      "size": "large",
+      "placement": "Centered on the main wall above the sofa",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "lighting",
+      "floor material",
+      "wall molding"
+    ],
+    "mustAddFurniture": true
+  }
+}

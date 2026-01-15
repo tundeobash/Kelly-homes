@@ -1,0 +1,113 @@
+{
+  "roomSummary": {
+    "roomType": "living_room",
+    "lighting": "recessed_ceiling_lights, natural_light",
+    "floor": "light_hardwood",
+    "walls": "white_wainscoting_and_molding"
+  },
+  "style": {
+    "name": "transitional",
+    "keywords": [
+      "elegant",
+      "comfortable",
+      "balanced",
+      "sophisticated",
+      "clean_lines"
+    ],
+    "avoid": [
+      "excessive_ornamentation",
+      "minimalist_coldness",
+      "rustic_elements",
+      "industrial_materials"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "white",
+      "cream",
+      "light_grey",
+      "beige"
+    ],
+    "accent": [
+      "soft_blue",
+      "sage_green",
+      "gold",
+      "silver"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Upholstered with clean lines and comfortable cushions, track or subtly rolled arms.",
+      "color": "light_grey",
+      "material": "linen_blend_fabric",
+      "size": "large",
+      "placement": "against_main_wall",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Comfortable upholstered armchair, possibly with a slight curve or modern silhouette.",
+      "color": "soft_blue",
+      "material": "velvet_or_textured_fabric",
+      "size": "medium",
+      "placement": "angled_towards_sofa_near_window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Elegant design, possibly a mix of materials like wood and metal, or a simple glass top.",
+      "color": "natural_wood_or_dark_metal",
+      "material": "wood_and_metal_or_glass",
+      "size": "medium",
+      "placement": "centered_in_front_of_sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Soft, low-pile rug with a subtle pattern or solid color to define the seating area.",
+      "color": "cream_or_light_grey",
+      "material": "wool_or_viscose",
+      "size": "large",
+      "placement": "underneath_sofa_and_coffee_table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Simple and elegant, providing a surface next to the armchair.",
+      "color": "gold_or_dark_wood",
+      "material": "metal_or_wood_with_marble_top",
+      "size": "small",
+      "placement": "next_to_armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "lamp",
+      "styleNotes": "Floor lamp with a metallic base and a simple fabric drum shade for ambient lighting.",
+      "color": "brass_or_nickel",
+      "material": "metal_and_fabric",
+      "size": "medium",
+      "placement": "next_to_sofa_or_armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Large framed abstract or landscape art with muted tones, complementing the palette.",
+      "color": "muted_blues_greens_and_neutrals",
+      "material": "canvas_or_framed_print",
+      "size": "large",
+      "placement": "centered_on_main_wall_above_sofa",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "walls",
+      "ceiling_molding",
+      "floor_material",
+      "window_structure"
+    ],
+    "mustAddFurniture": true
+  }
+}

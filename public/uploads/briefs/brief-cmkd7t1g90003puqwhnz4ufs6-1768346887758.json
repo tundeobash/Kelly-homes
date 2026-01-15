@@ -1,0 +1,114 @@
+{
+  "roomSummary": {
+    "roomType": "living_room",
+    "lighting": "natural light from large window, recessed ceiling lights",
+    "floor": "light hardwood planks",
+    "walls": "white walls with classic wainscoting and crown molding"
+  },
+  "style": {
+    "name": "modern",
+    "keywords": [
+      "clean lines",
+      "minimalist",
+      "functional",
+      "sophisticated",
+      "airy",
+      "uncluttered"
+    ],
+    "avoid": [
+      "ornate patterns",
+      "heavy traditional furniture",
+      "excessive ornamentation",
+      "rustic elements"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "white",
+      "light grey",
+      "charcoal grey",
+      "black"
+    ],
+    "accent": [
+      "muted blue",
+      "sage green",
+      "warm beige"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Sleek, low-profile, modular design with clean lines",
+      "color": "Light Grey",
+      "material": "Fabric",
+      "size": "large",
+      "placement": "Centered on the main wall opposite the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Minimalist, geometric design, possibly with a glass or stone top",
+      "color": "Black",
+      "material": "Metal and Glass",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Sculptural, comfortable, with a modern, open frame",
+      "color": "Charcoal Grey",
+      "material": "Fabric",
+      "size": "medium",
+      "placement": "To the left of the sofa, angled towards the coffee table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Subtle abstract or textured pattern to define the seating area",
+      "color": "Cream/Beige",
+      "material": "Wool blend",
+      "size": "large",
+      "placement": "Under the sofa and coffee table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Simple, round or square, with a slender profile",
+      "color": "White",
+      "material": "Lacquered Wood or Metal",
+      "size": "small",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "lamp",
+      "styleNotes": "Tall, minimalist floor lamp with an arc or straight design",
+      "color": "Black",
+      "material": "Metal",
+      "size": "large",
+      "placement": "Behind the armchair or in the corner by the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Large abstract piece with muted colors or a minimalist landscape",
+      "color": "Muted Blue, Grey, White",
+      "material": "Canvas",
+      "size": "large",
+      "placement": "Centered on the main wall above the sofa",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "lighting fixtures",
+      "wall paneling",
+      "crown molding",
+      "floor material",
+      "window structure"
+    ],
+    "mustAddFurniture": true
+  }
+}

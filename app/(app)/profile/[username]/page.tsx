@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
+import { getUserContext } from "@/lib/auth/getUserContext"
 import { prisma } from "@/lib/prisma"
 import { redirect } from "next/navigation"
 import Link from "next/link"
@@ -45,8 +44,8 @@ export default async function ProfilePage({
 }: {
   params: { username: string }
 }) {
-  const session = await getServerSession(authOptions)
-  const profile = await getProfileData(params.username, session?.user?.id)
+  const userContext = await getUserContext()
+  const profile = await getProfileData(params.username, userContext?.userId)
 
   if (!profile) {
     redirect("/")

@@ -66,22 +66,26 @@ model VerificationToken {
 }
 
 model RoomProject {
-  id          String   @id @default(cuid())
-  userId      String
-  name        String
-  roomType    String   // living room, bedroom, office, etc.
-  imageUrl    String   // URL to uploaded room image
-  length      Float    // Room dimensions in feet
-  width       Float
-  height      Float
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  roomType        String   // living room, bedroom, office, etc.
+  imageUrl        String   // URL to uploaded room image
+  length          Float    // Room dimensions in feet
+  width           Float
+  height          Float
+  aiDesignsJson   Json     @default("[]") // Array of { id, style, budgetRange, imageUrl, createdAt }
+  selectedAiDesignId String? // ID of currently selected AI design
+  lastAiSettings  Json?    // { style, budgetRange, userPrompt, updatedAt }
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   recommendations Recommendation[]
   
   @@index([userId])
 }
+
 
 model FurnitureItem {
   id          String   @id @default(cuid())
@@ -164,6 +168,7 @@ model CartItem {
   furnitureItem FurnitureItem @relation(fields: [furnitureItemId], references: [id])
   
   @@unique([cartId, furnitureItemId])
+  @@index([furnitureItemId])
   @@index([cartId])
 }
 

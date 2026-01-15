@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -10,15 +10,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-// Using simple HTML5 canvas version to avoid Konva SSR issues
-// TODO: Replace with Konva or AR SDK when ready
-import RoomPreview from "./RoomPreviewSimple"
 import RoomPhotoViewer from "./RoomPhotoViewer"
+import RoomPhotoUploader from "./RoomPhotoUploader"
+import RoomPreviewWithOverlay from "./RoomPreviewWithOverlay"
+import { PlacedItem } from "./RoomPreviewWithOverlay"
+import { catalog } from "@/lib/catalog"
 import Link from "next/link"
-import { Sparkles, ShoppingCart, Upload } from "lucide-react"
+import { Sparkles, ShoppingCart, X } from "lucide-react"
 import { useRouter } from "next/navigation"
+import AiDesignGallery from "./AiDesignGallery"
 
 interface ProjectViewProps {
   project: any
@@ -35,31 +35,153 @@ export default function ProjectView({
 }: ProjectViewProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
-  const [uploadingImage, setUploadingImage] = useState(false)
   const [selectedDesigner, setSelectedDesigner] = useState<string>("")
-  const [recommendations, setRecommendations] = useState(project.recommendations)
+  const [recommendedSkus, setRecommendedSkus] = useState<CatalogItem[]>([])
   const [currentImageUrl, setCurrentImageUrl] = useState(project.imageUrl || "")
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [placedItems, setPlacedItems] = useState<PlacedItem[]>([])
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+  const [aiDesigns, setAiDesigns] = useState(project.aiDesigns || [])
+  const [selectedAiDesignId, setSelectedAiDesignId] = useState(project.selectedAiDesignId || null)
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null)
 
-  const isBlobUrl = currentImageUrl.startsWith("blob:")
+  // Update AI designs when project changes
+  useEffect(() => {
+    if (project.aiDesigns) {
+      setAiDesigns(project.aiDesigns)
+    }
+    if (project.selectedAiDesignId !== undefined) {
+      setSelectedAiDesignId(project.selectedAiDesignId)
+    }
+    // Compute cover image: selected design > first design > room image
+    let cover: string | null = null
+    if (project.selectedAiDesignId && project.aiDesigns) {
+      const selected = project.aiDesigns.find((d: any) => d.id === project.selectedAiDesignId)
+      if (selected) cover = selected.imageUrl
+    }
+    if (!cover && project.aiDesigns && project.aiDesigns.length > 0) {
+      cover = project.aiDesigns[0].imageUrl
+    }
+    if (!cover) cover = project.imageUrl || null
+    setCoverImageUrl(cover)
+  }, [project])
+
+  useEffect(() => {
+    if (project.id) {
+      const storageKey = `project:${project.id}:scene`
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        try {
+          const data = JSON.parse(saved)
+          if (data.placedItems && Array.isArray(data.placedItems)) {
+            setPlacedItems(data.placedItems)
+            if (data.selectedItemId) {
+              setSelectedItemId(data.selectedItemId)
+            }
+          }
+        } catch (e) {
+          console.error("Failed to load scene:", e)
+        }
+      }
+    }
+  }, [project.id])
+
+  useEffect(() => {
+    if (project.id && placedItems.length >= 0) {
+      const storageKey = `project:${project.id}:scene`
+      const data = {
+        placedItems,
+        selectedItemId,
+      }
+      localStorage.setItem(storageKey, JSON.stringify(data))
+    }
+  }, [placedItems, selectedItemId, project.id])
+
+  const handleAddItem = (skuId: string) => {
+    const maxZ = placedItems.length > 0 ? Math.max(...placedItems.map((i) => i.zIndex)) : 0
+    const defaultX = 300
+    // Default to floor level (lower 35% of image, assuming 400px height)
+    const defaultFloorY = 400 * 0.65
+    const defaultY = defaultFloorY
+
+    const newItem: PlacedItem = {
+      id: crypto.randomUUID(),
+      skuId,
+      x: defaultX,
+      y: defaultY,
+      scale: 40,
+      opacity: 0.9,
+      roll: 0,
+      yaw: 0,
+      pitch: 0,
+      perspective: 1000,
+      zIndex: maxZ + 1,
+      anchorX: defaultX / 600, // Normalized (assuming 600px width)
+      anchorY: defaultY / 400, // Normalized (assuming 400px height)
+      floorY: defaultFloorY,
+      depth: 0.65, // Default depth for floor level
+    }
+
+    setPlacedItems([...placedItems, newItem])
+    setSelectedItemId(newItem.id)
+  }
+
+  const handleDeleteItem = (id: string) => {
+    setPlacedItems(placedItems.filter((item) => item.id !== id))
+    if (selectedItemId === id) {
+      setSelectedItemId(null)
+    }
+  }
+
+  const handleClearAll = () => {
+    setPlacedItems([])
+    setSelectedItemId(null)
+  }
 
   const handleGenerateRecommendation = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/projects/${project.id}/recommendations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stylePreference: userPreferences,
-          budgetMax: userBudget,
-          designerId: selectedDesigner && selectedDesigner !== "none" ? selectedDesigner : undefined,
-        }),
+      const { generateSkuRecommendations } = await import("@/lib/recommendations")
+      const recommendedSkus = generateSkuRecommendations()
+      
+      // Create placed items from recommended SKUs
+      const newPlacedItems = recommendedSkus.map((sku, index) => {
+        // Distribute items across lower half of room (floor area)
+        const containerWidth = 600 // Approximate container width
+        const containerHeight = 400 // Approximate container height
+        const floorStartY = containerHeight * 0.5 // Start from middle (floor area)
+        
+        // Calculate positions to avoid stacking
+        const itemsPerRow = 3
+        const row = Math.floor(index / itemsPerRow)
+        const col = index % itemsPerRow
+        const spacingX = containerWidth / (itemsPerRow + 1)
+        const spacingY = (containerHeight - floorStartY) / 3
+        
+        const x = spacingX * (col + 1) - 50 // Center offset
+        const y = floorStartY + spacingY * row + 20
+        
+        const maxZ = placedItems.length > 0 ? Math.max(...placedItems.map((i) => i.zIndex)) : 0
+        
+        return {
+          id: crypto.randomUUID(),
+          skuId: sku.id,
+          x,
+          y,
+          scale: 40,
+          opacity: 0.9,
+          roll: 0,
+          yaw: 0,
+          pitch: 0,
+          perspective: 1000,
+          zIndex: maxZ + index + 1,
+        }
       })
-
-      if (res.ok) {
-        const newRecommendation = await res.json()
-        setRecommendations([newRecommendation, ...recommendations])
-      }
+      
+      setPlacedItems([...placedItems, ...newPlacedItems])
+      setSelectedItemId(newPlacedItems[0]?.id || null)
+      
+      // Store recommended SKUs for display
+      setRecommendedSkus(recommendedSkus)
     } catch (error) {
       console.error("Error generating recommendation:", error)
     } finally {
@@ -67,77 +189,6 @@ export default function ProjectView({
     }
   }
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    // Validate file type
-    const validTypes = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
-    if (!validTypes.includes(file.type)) {
-      alert("Unsupported file type. Please upload JPG/PNG/WEBP/PDF.")
-      return
-    }
-
-    setUploadingImage(true)
-
-    try {
-      // Upload image
-      const formDataUpload = new FormData()
-      formDataUpload.append("file", file)
-
-      const uploadRes = await fetch("/api/upload", {
-        method: "POST",
-        body: formDataUpload,
-      })
-
-      if (!uploadRes.ok) {
-        throw new Error("Failed to upload image")
-      }
-
-      const uploadData = await uploadRes.json()
-      const newImageUrl = uploadData.url
-
-      // Validate we got a persistent URL, not a blob
-      if (!newImageUrl || newImageUrl.startsWith("blob:")) {
-        throw new Error("Invalid image URL received. Please try again.")
-      }
-
-      // Update project with new image URL
-      const updateRes = await fetch(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: newImageUrl }),
-      })
-
-      if (!updateRes.ok) {
-        const errorData = await updateRes.json().catch(() => ({}))
-        throw new Error(errorData.error || "Failed to update project")
-      }
-
-      const updatedProject = await updateRes.json()
-      
-      if (process.env.NODE_ENV === "development") {
-        console.log("[PROJECT UPDATE] Updated imageUrl:", updatedProject.imageUrl)
-        // Verify no blob URL was stored
-        if (updatedProject.imageUrl?.startsWith("blob:")) {
-          console.error("[PROJECT UPDATE] ERROR: Blob URL was stored in DB!")
-        }
-      }
-
-      setCurrentImageUrl(newImageUrl)
-      router.refresh()
-    } catch (error) {
-      console.error("Error uploading image:", error)
-      alert("Failed to upload image. Please try again.")
-    } finally {
-      setUploadingImage(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
-    }
-  }
-
-  const latestRecommendation = recommendations[0]
 
   return (
     <>
@@ -151,76 +202,114 @@ export default function ProjectView({
 
         <div className="grid lg:grid-cols-2 gap-8">
           <div>
-            <Card className="mb-6">
+            <RoomPhotoUploader
+              projectId={project.id}
+              currentImageUrl={currentImageUrl}
+              onImageUrlChange={setCurrentImageUrl}
+              showTitle={true}
+            />
+
+            <Card>
               <CardHeader>
-                <div className="flex justify-between items-center">
-                  <CardTitle>Room Photo</CardTitle>
-                  {isBlobUrl && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploadingImage}
-                    >
-                      <Upload className="h-4 w-4 mr-2" />
-                      {uploadingImage ? "Uploading..." : "Re-upload Image"}
-                    </Button>
-                  )}
-                </div>
+                <CardTitle>Room Layout Preview</CardTitle>
+                <CardDescription>
+                  Click a SKU below to see it in your room
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div className="aspect-video bg-gray-200 rounded-lg overflow-hidden">
-                    <RoomPhotoViewer
-                      imageUrl={currentImageUrl}
-                      alt={project.name}
-                      className="w-full h-full"
-                    />
-                  </div>
-                  {isBlobUrl && (
-                    <div className="space-y-2">
-                      <Label htmlFor="image-upload">Upload New Image</Label>
-                      <Input
-                        ref={fileInputRef}
-                        id="image-upload"
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,application/pdf"
-                        onChange={handleImageUpload}
-                        className="hidden"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Accepted: JPG, PNG, WEBP, PDF
-                      </p>
-                    </div>
-                  )}
-                  {process.env.NODE_ENV === "development" && (
-                    <p className="text-xs text-muted-foreground">
-                      Image URL: {currentImageUrl || "missing"}
-                    </p>
-                  )}
+                <RoomPreviewWithOverlay
+                  roomImage={currentImageUrl || ""}
+                  projectId={project.id}
+                  placedItems={placedItems}
+                  selectedItemId={selectedItemId}
+                  onPlacedItemsChange={setPlacedItems}
+                  onSelectedItemChange={setSelectedItemId}
+                  onAddItem={handleAddItem}
+                  onDeleteItem={handleDeleteItem}
+                  onClearAll={handleClearAll}
+                />
+              </CardContent>
+            </Card>
+          </div>
+
+          <div>
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle>SKU Catalog</CardTitle>
+                <CardDescription>
+                  Click a SKU to add it to your room
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-3">
+                  {catalog.map((sku) => (
+                    <button
+                      key={sku.id}
+                      onClick={() => handleAddItem(sku.id)}
+                      className="p-3 border rounded-lg hover:bg-muted transition-colors text-left"
+                    >
+                      <div className="aspect-square bg-gray-100 rounded mb-2 relative overflow-hidden">
+                        <img
+                          src={sku.imagePath}
+                          alt={sku.name}
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                      <p className="text-sm font-medium truncate">{sku.name}</p>
+                      <p className="text-xs text-muted-foreground">{sku.category}</p>
+                      <p className="text-sm font-bold mt-1">${sku.price.toFixed(2)}</p>
+                    </button>
+                  ))}
                 </div>
               </CardContent>
             </Card>
 
-            {latestRecommendation && (
-              <Card>
+            {placedItems.length > 0 && (
+              <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>Layout Preview</CardTitle>
-                  <CardDescription>
-                    See how furniture fits in your room
-                  </CardDescription>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Placed Items ({placedItems.length})</CardTitle>
+                    <Button variant="outline" size="sm" onClick={handleClearAll}>
+                      Clear All
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <RoomPreview
-                    roomImage={currentImageUrl || ""}
-                    items={latestRecommendation.items}
-                  />
+                  <div className="space-y-2">
+                    {placedItems.map((item) => {
+                      const sku = catalog.find((s) => s.id === item.skuId)
+                      if (!sku) return null
+                      const instanceNumber = placedItems.filter((i) => i.skuId === item.skuId).indexOf(item) + 1
+                      const totalInstances = placedItems.filter((i) => i.skuId === item.skuId).length
+                      const displayName = totalInstances > 1 ? `${sku.name} (${instanceNumber})` : sku.name
+
+                      return (
+                        <div
+                          key={item.id}
+                          className={`flex items-center justify-between p-2 border rounded-lg cursor-pointer transition-colors ${
+                            selectedItemId === item.id ? "bg-primary/10 border-primary" : "hover:bg-muted"
+                          }`}
+                          onClick={() => setSelectedItemId(item.id)}
+                        >
+                          <span className="text-sm font-medium">{displayName}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteItem(item.id)
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </CardContent>
               </Card>
             )}
-          </div>
 
-          <div>
             <Card className="mb-6">
               <CardHeader>
                 <CardTitle>Generate Recommendations</CardTitle>
@@ -261,71 +350,145 @@ export default function ProjectView({
               </CardContent>
             </Card>
 
-            {latestRecommendation && (
+            {recommendedSkus.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle>Recommended Items</CardTitle>
                   <CardDescription>
-                    Total: ${latestRecommendation.totalPrice.toFixed(2)}
+                    Total: ${recommendedSkus.reduce((sum, sku) => sum + sku.price, 0).toFixed(2)}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {latestRecommendation.items.map((item: any) => (
+                    {recommendedSkus.map((sku) => (
                       <div
-                        key={item.id}
+                        key={sku.id}
                         className="flex gap-4 p-4 border rounded-lg"
                       >
                         <img
-                          src={item.furnitureItem.imageUrl}
-                          alt={item.furnitureItem.name}
+                          src={sku.imagePath}
+                          alt={sku.name}
                           className="w-24 h-24 object-cover rounded"
                         />
                         <div className="flex-1">
-                          <h4 className="font-semibold">
-                            {item.furnitureItem.name}
-                          </h4>
+                          <h4 className="font-semibold">{sku.name}</h4>
                           <p className="text-sm text-muted-foreground">
-                            {item.furnitureItem.seller}
+                            {sku.seller || "Kelly Homes"}
                           </p>
                           <p className="text-lg font-bold mt-2">
-                            ${item.furnitureItem.price.toFixed(2)}
+                            ${sku.price.toFixed(2)}
                           </p>
                         </div>
-                        <Button
-                          size="sm"
-                          onClick={async () => {
-                            await fetch("/api/cart", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                furnitureItemId: item.furnitureItem.id,
-                              }),
-                            })
-                          }}
-                        >
-                          <ShoppingCart className="h-4 w-4" />
-                        </Button>
                       </div>
                     ))}
                     <Button
                       className="w-full mt-4"
                       onClick={async () => {
-                        for (const item of latestRecommendation.items) {
-                          await fetch("/api/cart", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              furnitureItemId: item.furnitureItem.id,
-                            }),
-                          })
+                        setLoading(true)
+                        try {
+                          const results = await Promise.all(
+                            recommendedSkus.map(async (sku) => {
+                              const res = await fetch("/api/cart", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  skuId: sku.id,
+                                  name: sku.name,
+                                  price: sku.price,
+                                  imageUrl: sku.imagePath,
+                                  category: sku.category.toLowerCase(),
+                                  seller: sku.seller || "Kelly Homes",
+                                }),
+                              })
+                              return res.ok
+                            })
+                          )
+                          
+                          if (results.every((r) => r)) {
+                            alert("All items added to cart!")
+                            router.push("/checkout")
+                          } else {
+                            alert("Some items could not be added. Please try again.")
+                          }
+                        } catch (error) {
+                          console.error("Error adding to cart:", error)
+                          alert("Failed to add items to cart")
+                        } finally {
+                          setLoading(false)
                         }
-                        window.location.href = "/checkout"
                       }}
+                      disabled={loading}
                     >
-                      Add All to Cart
+                      {loading ? "Adding..." : "Add All to Cart"}
                     </Button>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Selected AI Design Preview */}
+            {selectedAiDesignId && aiDesigns.length > 0 && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>Selected AI Design</CardTitle>
+                  <CardDescription>
+                    Your chosen design for this project
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {coverImageUrl && (
+                    <div className="relative aspect-video rounded-lg overflow-hidden border-2 border-primary">
+                      <img
+                        src={coverImageUrl}
+                        alt="Selected AI design"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  {selectedAiDesignId && (
+                    <Button
+                      onClick={() => router.push(`/project/${project.id}/shop-ai`)}
+                      className="w-full mt-4"
+                    >
+                      Shop this AI look
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* AI Design Gallery */}
+            {aiDesigns && Array.isArray(aiDesigns) && aiDesigns.length > 0 && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>AI Design Options</CardTitle>
+                      <CardDescription>
+                        Select an AI-generated design or shop this look
+                      </CardDescription>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push("/galleries")}
+                    >
+                      View Gallery
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <AiDesignGallery
+                    projectId={project.id}
+                    aiDesigns={aiDesigns.map((d: any) => ({
+                      id: d.id,
+                      imageUrl: d.imageUrl,
+                      style: d.style,
+                      budgetRange: d.budgetRange,
+                      createdAt: d.createdAt,
+                    }))}
+                    selectedAiDesignId={selectedAiDesignId || undefined}
+                  />
                 </CardContent>
               </Card>
             )}

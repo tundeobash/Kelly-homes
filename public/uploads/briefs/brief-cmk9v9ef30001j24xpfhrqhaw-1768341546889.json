@@ -1,0 +1,117 @@
+{
+  "roomSummary": {
+    "roomType": "Living Room",
+    "lighting": "Bright natural light from large window, recessed ceiling lights",
+    "floor": "Light to medium tone hardwood planks",
+    "walls": "White with classic wainscoting and crown molding"
+  },
+  "style": {
+    "name": "minimalist",
+    "keywords": [
+      "clean lines",
+      "uncluttered",
+      "functional",
+      "simple",
+      "neutral",
+      "serene",
+      "spacious"
+    ],
+    "avoid": [
+      "ornate",
+      "excessive decoration",
+      "busy patterns",
+      "bright primary colors",
+      "bulky furniture",
+      "clutter"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "White",
+      "Off-white",
+      "Light Grey",
+      "Natural Wood Tones"
+    ],
+    "accent": [
+      "Charcoal Grey",
+      "Soft Sage Green",
+      "Muted Blue"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Sleek, low-profile, clean lines",
+      "color": "Light Grey",
+      "material": "Linen blend",
+      "size": "medium",
+      "placement": "Centered against the main wall",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Simple, geometric, open base",
+      "color": "Natural Wood",
+      "material": "Oak",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Soft texture, subtle solid color",
+      "color": "Off-white",
+      "material": "Wool blend",
+      "size": "large",
+      "placement": "Under the front legs of the sofa and coffee table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Sculptural, comfortable, minimalist form",
+      "color": "Charcoal Grey",
+      "material": "Fabric",
+      "size": "small",
+      "placement": "To the left of the sofa, angled towards it",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Minimalist, round, slender legs",
+      "color": "Black",
+      "material": "Metal and wood",
+      "size": "small",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "lamp",
+      "styleNotes": "Arc floor lamp, slender, functional design",
+      "color": "Black",
+      "material": "Metal",
+      "size": "large",
+      "placement": "Behind the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Large, abstract, muted tones, simple frame",
+      "color": "Greige, White, Soft Blue",
+      "material": "Canvas",
+      "size": "large",
+      "placement": "Centered on the main wall above the sofa",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "lighting",
+      "floor material",
+      "wall color",
+      "wall paneling",
+      "window frames"
+    ],
+    "mustAddFurniture": true
+  }
+}

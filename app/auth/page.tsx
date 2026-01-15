@@ -211,7 +211,7 @@ export default function AuthPage() {
               className="text-primary hover:underline"
             >
               {isLogin
-                ? "Don&apos;t have an account? Sign up"
+                ? "Don't have an account? Sign up"
                 : "Already have an account? Sign in"}
             </button>
           </div>

@@ -1,0 +1,113 @@
+{
+  "roomSummary": {
+    "roomType": "Living Room",
+    "lighting": "Recessed ceiling lights, natural light from large window",
+    "floor": "Light natural wood planks",
+    "walls": "White with classic wainscoting and crown molding"
+  },
+  "style": {
+    "name": "Industrial",
+    "keywords": [
+      "Raw materials",
+      "Exposed elements",
+      "Utilitarian",
+      "Robust",
+      "Vintage",
+      "Factory-inspired"
+    ],
+    "avoid": [
+      "Ornate",
+      "Delicate",
+      "Plush",
+      "Traditional patterns",
+      "Overly decorative"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "Charcoal grey",
+      "Matte black",
+      "Warm white",
+      "Distressed brown"
+    ],
+    "accent": [
+      "Aged brass",
+      "Deep olive green",
+      "Rust orange"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Clean lines, sturdy frame, minimalist design",
+      "color": "Charcoal grey",
+      "material": "Distressed leather or robust fabric",
+      "size": "large",
+      "placement": "Against the main wall (opposite window)",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Reclaimed wood top, metal base, raw aesthetic",
+      "color": "Dark wood, black metal",
+      "material": "Reclaimed wood, steel",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Metal frame, leather upholstery, vintage industrial feel",
+      "color": "Cognac brown",
+      "material": "Leather, black steel",
+      "size": "medium",
+      "placement": "Adjacent to the sofa, facing the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Subtle pattern, durable texture to ground the seating area",
+      "color": "Dark grey, faded black",
+      "material": "Jute or low-pile wool",
+      "size": "large",
+      "placement": "Under the sofa and coffee table",
+      "mustBeVisible": true
+    },
+    {
+      "type": "lamp",
+      "styleNotes": "Adjustable arm floor lamp, exposed bulb, metal finish",
+      "color": "Matte black, aged brass accents",
+      "material": "Steel, brass",
+      "size": "large",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Large abstract piece or architectural blueprint print, metal frame",
+      "color": "Monochromatic, muted tones",
+      "material": "Canvas, metal",
+      "size": "large",
+      "placement": "Centered on the main wall above the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "plant",
+      "styleNotes": "Tall, architectural plant in a concrete or metal planter",
+      "color": "Deep green, grey planter",
+      "material": "Ceramic/concrete planter, natural plant",
+      "size": "medium",
+      "placement": "In a corner near the window",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "Walls",
+      "Lighting",
+      "Floor material"
+    ],
+    "mustAddFurniture": true
+  }
+}

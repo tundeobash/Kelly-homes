@@ -1,0 +1,125 @@
+{
+  "roomSummary": {
+    "roomType": "Living Room",
+    "lighting": "Recessed ceiling lights, natural light from large window",
+    "floor": "Light-toned hardwood planks",
+    "walls": "White walls with classic wainscoting and crown molding"
+  },
+  "style": {
+    "name": "Mediterranean",
+    "keywords": [
+      "Warm",
+      "Earthy",
+      "Natural",
+      "Rustic",
+      "Coastal",
+      "Terracotta",
+      "Olive",
+      "Blue",
+      "White",
+      "Stucco",
+      "Wrought iron",
+      "Wood",
+      "Ceramics",
+      "Textiles"
+    ],
+    "avoid": [
+      "Modern",
+      "Minimalist",
+      "Industrial",
+      "Overly ornate",
+      "Dark woods",
+      "Synthetic materials",
+      "Chrome"
+    ]
+  },
+  "palette": {
+    "primary": [
+      "Off-white",
+      "Terracotta",
+      "Olive Green",
+      "Deep Blue",
+      "Natural Wood Tones"
+    ],
+    "accent": [
+      "Sunny Yellow",
+      "Coral",
+      "Sandstone",
+      "Linen Beige"
+    ]
+  },
+  "furniture": [
+    {
+      "type": "sofa",
+      "styleNotes": "Low-slung, comfortable, with natural fabric upholstery and clean lines",
+      "color": "Off-white",
+      "material": "Linen",
+      "size": "large",
+      "placement": "Against the main wall opposite the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "armchair",
+      "styleNotes": "Comfortable, with a woven texture or natural wood frame",
+      "color": "Natural beige",
+      "material": "Rattan and linen",
+      "size": "medium",
+      "placement": "Adjacent to the sofa, facing the window",
+      "mustBeVisible": true
+    },
+    {
+      "type": "coffee_table",
+      "styleNotes": "Rustic, sturdy, simple design, possibly with carved details or a mosaic top",
+      "color": "Dark wood",
+      "material": "Reclaimed wood",
+      "size": "medium",
+      "placement": "In front of the sofa",
+      "mustBeVisible": true
+    },
+    {
+      "type": "rug",
+      "styleNotes": "Textured, natural fiber rug with a subtle pattern or solid weave",
+      "color": "Jute/natural beige",
+      "material": "Jute",
+      "size": "large",
+      "placement": "Under the sofa and coffee table, anchoring the seating area",
+      "mustBeVisible": true
+    },
+    {
+      "type": "side_table",
+      "styleNotes": "Small, hand-painted ceramic or simple wooden table",
+      "color": "Terracotta/white",
+      "material": "Ceramic",
+      "size": "small",
+      "placement": "Next to the armchair",
+      "mustBeVisible": true
+    },
+    {
+      "type": "plant",
+      "styleNotes": "Large, lush Mediterranean foliage in a rustic pot",
+      "color": "Green",
+      "material": "Terracotta pot",
+      "size": "large",
+      "placement": "In the corner by the window, adding natural vibrancy",
+      "mustBeVisible": true
+    },
+    {
+      "type": "art",
+      "styleNotes": "Large, abstract or landscape art featuring Mediterranean colors and themes",
+      "color": "Blues, greens, terracotta, sandy tones",
+      "material": "Canvas",
+      "size": "large",
+      "placement": "Centered on the main wall above the sofa",
+      "mustBeVisible": true
+    }
+  ],
+  "constraints": {
+    "keepArchitecture": true,
+    "doNotChange": [
+      "lighting",
+      "floor material",
+      "wall paneling"
+    ],
+    "mustAddFurniture": true
+  }
+}
