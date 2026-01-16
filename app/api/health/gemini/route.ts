@@ -11,6 +11,20 @@ function generateRequestId(): string {
 }
 
 export async function GET() {
+  // Skip during build phase to prevent side effects
+  if (process.env.NEXT_PHASE === "phase-production-build" || process.env.NEXT_PHASE === "phase-production-export") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          name: "BuildPhase",
+          message: "Health check not available during build phase",
+        },
+      },
+      { status: 503 }
+    )
+  }
+
   const requestId = generateRequestId()
 
   try {

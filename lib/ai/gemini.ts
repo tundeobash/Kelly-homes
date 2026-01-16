@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai"
+import { isBuildPhase } from "@/lib/isBuildPhase"
 
 export interface GeminiModel {
   fullName: string // e.g. "models/gemini-2.5-flash"
@@ -37,6 +38,11 @@ export interface GeminiConfig {
  * Get Gemini configuration from environment variables
  */
 export function getGeminiConfig(): GeminiConfig | null {
+  // Skip during build phase to prevent side effects
+  if (isBuildPhase) {
+    return null
+  }
+
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
     return null
@@ -68,6 +74,11 @@ export function createGeminiClient(config?: GeminiConfig) {
  * List available Gemini models
  */
 export async function listModels(requestId?: string): Promise<GeminiModel[]> {
+  // Skip during build phase to prevent side effects
+  if (isBuildPhase) {
+    return []
+  }
+
   const config = getGeminiConfig()
   if (!config) {
     throw new Error("GEMINI_API_KEY not configured")
@@ -146,6 +157,11 @@ export async function validateModel(
   method: "generateContent" | "generateText" | "generateImage",
   requestId?: string
 ): Promise<{ valid: boolean; matchedModel?: string; availableModels: string[] }> {
+  // Skip during build phase to prevent side effects
+  if (isBuildPhase) {
+    return { valid: false, availableModels: [] }
+  }
+
   try {
     const models = await listModels(requestId)
     // Normalize input to shortName for comparison
@@ -224,6 +240,11 @@ export async function generateText(
   imageParts?: Array<{ data: string; mimeType: string }>,
   requestId?: string
 ): Promise<string> {
+  // Skip during build phase to prevent side effects
+  if (isBuildPhase) {
+    return ""
+  }
+
   const config = getGeminiConfig()
   if (!config) {
     throw new Error("GEMINI_API_KEY not configured")
