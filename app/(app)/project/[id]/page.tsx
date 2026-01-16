@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { generateRecommendation } from "@/lib/recommendation-engine"
+import { normalizeProject } from "@/lib/api/normalize-project"
 import ProjectView from "@/components/ProjectView"
 
 export default async function ProjectPage({
@@ -37,9 +38,17 @@ export default async function ProjectPage({
     redirect("/profile/me")
   }
 
+  // Normalize project to get designs array (same as API does)
+  const normalizedProject = normalizeProject(project)
+  
+  // Use safe accessor for designs (normalizeProject returns aiDesigns)
+  const designs = normalizedProject.aiDesigns ?? []
+  
   if (process.env.NODE_ENV === "development") {
-    console.log("[PROJECT DETAIL] Project ID:", project.id)
-    console.log("[PROJECT DETAIL] Image URL:", project.imageUrl)
+    console.log("[PROJECT DETAIL] Project ID:", normalizedProject.id)
+    console.log("[PROJECT DETAIL] Image URL:", normalizedProject.imageUrl?.substring(0, 50))
+    console.log("[PROJECT DETAIL] Designs count:", designs.length)
+    console.log("[PROJECT DETAIL] First design URL:", designs[0]?.imageUrl?.substring(0, 50))
   }
 
   // Get user preferences
@@ -51,10 +60,17 @@ export default async function ProjectPage({
   const designers = await prisma.designer.findMany({
     orderBy: { name: "asc" },
   })
+  
+  // Merge normalized data with recommendations and user
+  const projectWithDesigns = {
+    ...normalizedProject,
+    recommendations: project.recommendations,
+    user: project.user,
+  }
 
   return (
     <ProjectView
-      project={project}
+      project={projectWithDesigns}
       userPreferences={user?.preferredStyles || []}
       userBudget={user?.budgetMax}
       designers={designers}

@@ -27,18 +27,18 @@ const nextConfig = {
   },
   webpack: (config, { isServer }) => {
     // Ignore canvas module to prevent SSR issues with Konva
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        canvas: false,
-      }
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      canvas: false,
     }
     
     // Exclude canvas from being bundled
     config.externals = config.externals || []
-    if (!isServer) {
+    if (isServer) {
+      config.externals.push('canvas')
+    } else {
       config.externals.push({
-        canvas: 'canvas',
+        canvas: false,
       })
     }
     

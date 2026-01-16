@@ -4,7 +4,212 @@ import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { unlink } from "fs/promises"
 import { join } from "path"
-import { existsSync } from "fs"
+import { existsSync, readdirSync } from "fs"
+import { getUserContext, DEV_MODE } from "@/lib/auth/getUserContext"
+import { isDatabaseConnectionError } from "@/lib/db/connection-check"
+import { normalizeProject } from "@/lib/api/normalize-project"
+import { randomBytes } from "crypto"
+
+// Generate a unique request ID for logging
+function generateRequestId(): string {
+  return `req_${Date.now()}_${randomBytes(4).toString("hex")}`
+}
+
+/**
+ * Try to find a project image URL from saved uploads directory
+ * Returns the first image found that might belong to this project
+ */
+function findProjectImageFromUploads(projectId: string): string | null {
+  try {
+    const uploadsDir = join(process.cwd(), "public", "uploads")
+    if (!existsSync(uploadsDir)) {
+      return null
+    }
+
+    const files = readdirSync(uploadsDir)
+    // Look for image files (png, jpg, jpeg)
+    const imageFiles = files.filter(
+      (f) => f.match(/\.(png|jpg|jpeg)$/i) && !f.startsWith("design-")
+    )
+
+    if (imageFiles.length > 0) {
+      // Return the most recent image file
+      const sortedFiles = imageFiles.sort().reverse()
+      return `/uploads/${sortedFiles[0]}`
+    }
+  } catch (error) {
+    // Silently fail - this is a fallback
+  }
+  return null
+}
+
+/**
+ * Create a minimal mock project for DEV_MODE fallback
+ */
+function createMockProject(projectId: string, userId: string): any {
+  const imageUrl = findProjectImageFromUploads(projectId)
+  
+  return {
+    id: projectId,
+    userId,
+    name: `Project ${projectId.substring(0, 8)}`,
+    roomType: "living room",
+    imageUrl: imageUrl || null,
+    length: 12,
+    width: 10,
+    height: 9,
+    aiDesignsJson: [],
+    selectedAiDesignId: null,
+    lastAiSettings: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+}
+
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  const requestId = generateRequestId()
+  
+  try {
+    const userContext = await getUserContext()
+    if (!userContext) {
+      console.error(`[API PROJECT] [${requestId}] Unauthorized: No user context`)
+      return NextResponse.json(
+        {
+          error: "Unauthorized",
+          requestId,
+        },
+        { status: 401 }
+      )
+    }
+
+    const { userId, isDevMode } = userContext
+    const projectId = params.id
+
+    console.log(`[API PROJECT] [${requestId}] Fetch`, {
+      projectId,
+      userId,
+      isDevMode,
+    })
+
+    try {
+      const project = await prisma.roomProject.findUnique({
+        where: { id: projectId },
+        select: {
+          id: true,
+          userId: true,
+          name: true,
+          roomType: true,
+          imageUrl: true,
+          length: true,
+          width: true,
+          height: true,
+          aiDesignsJson: true,
+          selectedAiDesignId: true,
+          lastAiSettings: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+
+      if (!project) {
+        console.error(`[API PROJECT] [${requestId}] Project not found: ${projectId}`)
+        return NextResponse.json(
+          {
+            error: "Project not found",
+            requestId,
+          },
+          { status: 404 }
+        )
+      }
+
+      if (project.userId !== userId) {
+        console.error(`[API PROJECT] [${requestId}] Unauthorized access: ${projectId}`)
+        return NextResponse.json(
+          {
+            error: "Unauthorized",
+            requestId,
+          },
+          { status: 403 }
+        )
+      }
+
+      const normalizedProject = normalizeProject(project)
+
+      console.log(`[API PROJECT] [${requestId}] Success`, {
+        projectId,
+        fallbackUsed: false,
+      })
+
+      return NextResponse.json({
+        ...normalizedProject,
+        requestId,
+        fallbackUsed: false,
+      })
+    } catch (prismaError: any) {
+      // Check if this is a database connection error
+      if (isDatabaseConnectionError(prismaError)) {
+        if (DEV_MODE) {
+          console.log(`[API PROJECT] [${requestId}] DB connection error, using fallback`)
+          
+          // Try to create a mock project
+          const mockProject = createMockProject(projectId, userId)
+          const normalizedProject = normalizeProject(mockProject)
+
+          console.log(`[API PROJECT] [${requestId}] Success (fallback)`, {
+            projectId,
+            fallbackUsed: true,
+            imageUrl: mockProject.imageUrl,
+          })
+
+          return NextResponse.json({
+            ...normalizedProject,
+            requestId,
+            fallbackUsed: true,
+          })
+        } else {
+          // In production, return 503 Service Unavailable
+          console.error(`[API PROJECT] [${requestId}] Database unavailable (production)`)
+          return NextResponse.json(
+            {
+              error: "Database unavailable",
+              message: "The database server is currently unreachable. Please try again later.",
+              requestId,
+            },
+            { status: 503 }
+          )
+        }
+      }
+
+      // For other Prisma errors, log and return error
+      console.error(`[API PROJECT] [${requestId}] Error`, {
+        projectId,
+        message: prismaError.message,
+        code: prismaError.code,
+      })
+      return NextResponse.json(
+        {
+          error: "Database error",
+          message: prismaError.message || "Failed to fetch project",
+          requestId,
+        },
+        { status: 500 }
+      )
+    }
+  } catch (error: any) {
+    console.error(`[API PROJECT] [${requestId}] Unhandled error:`, error)
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        message: error.message || "An unexpected error occurred",
+        requestId,
+      },
+      { status: 500 }
+    )
+  }
+}
 
 export async function PATCH(
   request: Request,

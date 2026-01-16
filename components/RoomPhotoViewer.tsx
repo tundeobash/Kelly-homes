@@ -43,23 +43,8 @@ export default function RoomPhotoViewer({
     )
   }
 
-  // Handle blob URLs (temporary, non-persistent URLs from old uploads)
+  // Handle blob URLs - use regular img tag since next/image doesn't support blob URLs
   const isBlobUrl = imageUrl.startsWith("blob:")
-  if (isBlobUrl) {
-    return (
-      <div className={`bg-muted flex items-center justify-center rounded ${className}`}>
-        <div className="text-center p-4">
-          <p className="text-sm text-muted-foreground">Image unavailable</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Please re-upload this project&apos;s image
-          </p>
-          {process.env.NODE_ENV === "development" && (
-            <p className="text-xs text-red-500 mt-1">Blob URL detected: {imageUrl}</p>
-          )}
-        </div>
-      </div>
-    )
-  }
 
   const displayUrl = thumbnailUrl || imageUrl
 
@@ -79,22 +64,36 @@ export default function RoomPhotoViewer({
     setIsLoading(true)
   }
 
+  // Ensure we have a default responsive height if className doesn't provide one
+  const containerClassName = className && className.trim() !== "" 
+    ? className 
+    : "w-full h-[360px] md:h-[420px]"
+
   return (
     <>
       {/* Thumbnail */}
       <div
-        className={`relative cursor-pointer hover:opacity-90 transition-opacity ${className}`}
+        className={`relative cursor-pointer hover:opacity-90 transition-opacity ${containerClassName}`}
         onClick={handleImageClick}
       >
-        <div className="relative w-full h-full">
-          <Image
-            src={displayUrl}
-            alt={alt}
-            fill
-            className="object-cover rounded"
-            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-            onError={() => setImageError(true)}
-          />
+        <div className="relative w-full h-full overflow-hidden rounded-lg bg-muted">
+          {isBlobUrl ? (
+            <img
+              src={imageUrl}
+              alt={alt}
+              className="w-full h-full object-contain object-center rounded-lg"
+              onError={() => setImageError(true)}
+            />
+          ) : (
+            <Image
+              src={displayUrl}
+              alt={alt}
+              fill
+              className="object-contain object-center rounded-lg"
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+              onError={() => setImageError(true)}
+            />
+          )}
         </div>
       </div>
 
@@ -124,18 +123,31 @@ export default function RoomPhotoViewer({
                     <p className="text-muted-foreground">Loading...</p>
                   </div>
                 )}
-                <Image
-                  src={imageUrl}
-                  alt={alt}
-                  fill
-                  className="object-contain rounded"
-                  sizes="(max-width: 1920px) 100vw, 1920px"
-                  onLoad={() => setIsLoading(false)}
-                  onError={() => {
-                    setImageError(true)
-                    setIsLoading(false)
-                  }}
-                />
+                {isBlobUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt={alt}
+                    className="max-w-full max-h-full object-contain rounded"
+                    onLoad={() => setIsLoading(false)}
+                    onError={() => {
+                      setImageError(true)
+                      setIsLoading(false)
+                    }}
+                  />
+                ) : (
+                  <Image
+                    src={imageUrl}
+                    alt={alt}
+                    fill
+                    className="object-contain rounded"
+                    sizes="(max-width: 1920px) 100vw, 1920px"
+                    onLoad={() => setIsLoading(false)}
+                    onError={() => {
+                      setImageError(true)
+                      setIsLoading(false)
+                    }}
+                  />
+                )}
               </div>
             )}
           </div>

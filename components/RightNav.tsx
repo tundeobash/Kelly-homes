@@ -4,14 +4,16 @@ import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import SignOutButton from "@/components/SignOutButton"
-import { Palette, ShoppingBag, Users, ShoppingCart, User } from "lucide-react"
+import { Palette, ShoppingBag, Users, ShoppingCart, User, Sparkles, Image as ImageIcon } from "lucide-react"
 
 const navItems = [
+  { href: "/profile/me", label: "Profile", icon: User },
+  { href: "/ai-studio", label: "AI Studio", icon: Sparkles },
+  { href: "/galleries", label: "Galleries", icon: ImageIcon },
   { href: "/styles", label: "Styles", icon: Palette },
   { href: "/catalog", label: "Catalog", icon: ShoppingBag },
   { href: "/designers", label: "Designers", icon: Users },
   { href: "/checkout", label: "Cart", icon: ShoppingCart },
-  { href: "/profile/me", label: "Profile", icon: User },
 ]
 
 export default function RightNav() {

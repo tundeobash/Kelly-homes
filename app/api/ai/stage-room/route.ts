@@ -1,0 +1,1460 @@
+import { NextResponse } from "next/server"
+import { getUserContext } from "@/lib/auth/getUserContext"
+import { prisma } from "@/lib/prisma"
+import { randomBytes } from "crypto"
+import { writeFile, mkdir, stat, unlink } from "fs/promises"
+import { copyFileSync, readdirSync, statSync, readFileSync } from "fs"
+import { join } from "path"
+import { existsSync } from "fs"
+import { createHash } from "crypto"
+import sharp from "sharp"
+import { planRoomDesign, createFallbackPlan, PlannerResult } from "@/lib/ai/geminiPlanner"
+import { renderWithStability } from "@/lib/ai/stabilityRenderer"
+
+// Ensure Node.js runtime for Gemini calls
+export const runtime = "nodejs"
+
+// Generate a unique request ID for logging
+function generateRequestId(): string {
+  return `req_${Date.now()}_${randomBytes(4).toString("hex")}`
+}
+
+// Simple retry helper with exponential backoff
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 2,
+  baseDelayMs: number = 600
+): Promise<T> {
+  let lastError: any
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (error: any) {
+      lastError = error
+      if (attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1)
+        const jitter = delay * 0.3 * (Math.random() - 0.5) // +/- 30% jitter
+        await new Promise((resolve) => setTimeout(resolve, delay + jitter))
+      }
+    }
+  }
+  throw lastError
+}
+
+/**
+ * Saves a generated PNG image to disk and returns the public URL.
+ * Handles both remote URLs (fetches and saves) and base64 data (decodes and saves).
+ */
+async function saveGeneratedPng(params: {
+  data: string // Can be a remote URL (https://...) or base64 data
+  filename: string
+  requestId: string
+}): Promise<string> {
+  const { data, filename, requestId } = params
+  
+  // Ensure uploads directory exists
+  const uploadsDir = join(process.cwd(), "public", "uploads")
+  if (!existsSync(uploadsDir)) {
+    await mkdir(uploadsDir, { recursive: true })
+  }
+
+  const fullPath = join(uploadsDir, filename)
+  let buffer: Buffer
+
+  // Handle remote URL
+  if (data.startsWith("http://") || data.startsWith("https://")) {
+    try {
+      console.log(`[${requestId}] Fetching image from remote URL: ${data.substring(0, 50)}...`)
+      const response = await fetch(data)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: HTTP ${response.status}`)
+      }
+      const arrayBuffer = await response.arrayBuffer()
+      buffer = Buffer.from(arrayBuffer)
+    } catch (error: any) {
+      console.error(`[${requestId}] Error fetching remote image:`, error)
+      throw new Error(`Failed to fetch image from URL: ${error.message}`)
+    }
+  } 
+  // Handle base64 data
+  else if (data.startsWith("data:image/") || /^[A-Za-z0-9+/=]+$/.test(data)) {
+    try {
+      // Remove data URL prefix if present (e.g., "data:image/png;base64,")
+      const base64Data = data.includes(",") ? data.split(",")[1] : data
+      buffer = Buffer.from(base64Data, "base64")
+    } catch (error: any) {
+      console.error(`[${requestId}] Error decoding base64 image:`, error)
+      throw new Error(`Failed to decode base64 image: ${error.message}`)
+    }
+  } else {
+    throw new Error(`Invalid image data format. Expected URL or base64, got: ${data.substring(0, 50)}`)
+  }
+
+  // Write file to disk
+  try {
+    await writeFile(fullPath, buffer)
+    const byteSize = buffer.length
+    
+    // CRITICAL: Verify file exists after writing
+    try {
+      const stats = await stat(fullPath)
+      if (!stats.isFile()) {
+        throw new Error(`File exists but is not a regular file: ${fullPath}`)
+      }
+      if (stats.size !== byteSize) {
+        throw new Error(`File size mismatch: expected ${byteSize}, got ${stats.size}`)
+      }
+    } catch (statError: any) {
+      console.error(`[${requestId}] File verification failed:`, statError)
+      throw new Error(`File was not written correctly: ${statError.message}`)
+    }
+    
+    const publicUrl = `/uploads/${filename}`
+    
+    console.log(`[${requestId}] Saved generated image`, {
+      fullPath,
+      byteSize,
+      publicUrl,
+      verified: true,
+    })
+    
+    return publicUrl
+  } catch (error: any) {
+    console.error(`[${requestId}] Error writing file:`, error)
+    throw new Error(`Failed to save image file: ${error.message}`)
+  }
+}
+
+/**
+ * Generate a staged room image using OpenAI or Gemini
+ * Returns base64 image data or remote URL
+ */
+async function generateStagedImage(params: {
+  imageUrl: string
+  style: string
+  prompt?: string
+  moreFurniture?: boolean
+  requestId: string
+}): Promise<string> {
+  const { imageUrl, style, prompt, moreFurniture, requestId } = params
+  
+  // Check for FORCE_MOCK_AI flag
+  if (process.env.FORCE_MOCK_AI === "true") {
+    console.log(`[${requestId}] FORCE_MOCK_AI=true, using placeholder`)
+    return "mock"
+  }
+
+  const hasOpenAI = !!process.env.OPENAI_API_KEY
+  const hasGemini = !!process.env.GEMINI_API_KEY
+
+  console.log(`[${requestId}] Provider availability check`, {
+    hasOpenAIKey: hasOpenAI,
+    hasGeminiKey: hasGemini,
+  })
+
+  // Build style-specific furniture details
+  const styleFurnitureMap: Record<string, string> = {
+    rustic: "reclaimed wood coffee table, linen sofa, jute rug, warm floor lamp, wooden side table",
+    modern: "sleek sectional sofa, glass coffee table, geometric rug, modern floor lamp, metal side table",
+    minimalist: "simple low-profile sofa, minimalist coffee table, neutral rug, clean floor lamp, minimal decor",
+    scandinavian: "light wood coffee table, light-colored sofa, wool rug, simple floor lamp, natural wood side table",
+    industrial: "leather sofa, metal coffee table, dark rug, industrial floor lamp, metal side table",
+    "mid-century-modern": "retro sofa with tapered legs, mid-century coffee table, vintage rug, atomic floor lamp, teak side table",
+    bohemian: "colorful patterned sofa, eclectic coffee table, textured rug, boho floor lamp, decorative side table",
+    japandi: "low-profile sofa, minimalist wood coffee table, natural fiber rug, simple floor lamp, zen side table",
+    mediterranean: "warm-toned sofa, ornate coffee table, terracotta rug, Mediterranean floor lamp, carved side table",
+    coastal: "light-colored sofa, weathered wood coffee table, nautical rug, coastal floor lamp, beachy side table",
+    farmhouse: "comfortable sofa, farmhouse coffee table, rustic rug, vintage floor lamp, wooden side table",
+    transitional: "elegant sofa, transitional coffee table, classic rug, elegant floor lamp, refined side table",
+    "art-deco": "luxurious sofa, geometric coffee table, rich rug, art deco floor lamp, ornate side table",
+    "wabi-sabi": "simple natural sofa, imperfect wood coffee table, natural rug, simple floor lamp, handcrafted side table",
+    "tropical-modern": "modern sofa, tropical wood coffee table, vibrant rug, modern floor lamp, tropical side table",
+    contemporary: "comfortable modern sofa, contemporary coffee table, stylish rug, modern floor lamp, functional side table",
+  }
+  
+  const styleFurniture = styleFurnitureMap[style] || "sofa, coffee table, rug, floor lamp, side table"
+  
+  // Build the staging prompt - explicitly instruct to ADD NEW furniture in the transparent mask region
+  const furnitureNote = moreFurniture 
+    ? ` Add NEW furniture objects: ${styleFurniture}, additional decor items. Make them clearly visible and prominent.` 
+    : ` Add NEW furniture objects: ${styleFurniture}. Make them clearly visible and prominent.`
+  
+  const userPromptNote = prompt ? ` ${prompt}.` : ""
+  
+  // Strengthened prompt: explicitly add furniture in the transparent mask region, preserve architecture
+  const stagingPrompt = `Add new furniture and decor in the transparent region of the mask. Stage this room photo in ${style} style.${furnitureNote}${userPromptNote} The furniture must be clearly visible, well-placed, and match the ${style} aesthetic. Keep the rest of the room unchanged - do not modify walls, windows, room layout, or architecture outside the transparent region. Do not return the original image unchanged. Photorealistic. No text, no watermark.`
+
+  // Try OpenAI first if available
+  if (hasOpenAI) {
+    try {
+      console.log(`[${requestId}] Attempting OpenAI image generation`, {
+        imageUrl: imageUrl.substring(0, 50) + "...",
+        promptLength: stagingPrompt.length,
+      })
+      const result = await generateWithOpenAI(imageUrl, stagingPrompt, requestId)
+      console.log(`[${requestId}] OpenAI generation succeeded`, {
+        resultType: typeof result,
+        resultPreview: result.substring(0, 50) + "...",
+      })
+      return result
+    } catch (error: any) {
+      console.error(`[${requestId}] OpenAI generation failed:`, {
+        error: error.message,
+        stack: error.stack?.substring(0, 200),
+      })
+      // Fall through to Gemini or mock only if explicitly in dev mode
+      if (process.env.NODE_ENV === "development" && process.env.ALLOW_MOCK_FALLBACK === "true") {
+        console.warn(`[${requestId}] Dev mode: allowing mock fallback after OpenAI failure`)
+      } else {
+        // In production, re-throw the error instead of silently falling back
+        throw error
+      }
+    }
+  }
+
+  // Try Gemini if available (and OpenAI not available or failed)
+  if (hasGemini) {
+    try {
+      console.log(`[${requestId}] Attempting Gemini image generation`)
+      const result = await generateWithGemini(imageUrl, stagingPrompt, requestId)
+      console.log(`[${requestId}] Gemini generation succeeded`)
+      return result
+    } catch (error: any) {
+      console.error(`[${requestId}] Gemini generation failed:`, error.message)
+      // Only fall through to mock in dev mode with explicit flag
+      if (process.env.NODE_ENV === "development" && process.env.ALLOW_MOCK_FALLBACK === "true") {
+        console.warn(`[${requestId}] Dev mode: allowing mock fallback after Gemini failure`)
+      } else {
+        throw error
+      }
+    }
+  }
+
+  // No providers available
+  if (!hasOpenAI && !hasGemini) {
+    throw new Error("No AI provider configured. Set OPENAI_API_KEY or GEMINI_API_KEY environment variable.")
+  }
+
+  // All providers failed - only use mock if explicitly allowed
+  if (process.env.NODE_ENV === "development" && process.env.ALLOW_MOCK_FALLBACK === "true") {
+    console.warn(`[${requestId}] All providers failed, using placeholder fallback (dev mode)`)
+    return "mock"
+  }
+
+  // In production or without explicit fallback flag, throw error
+  throw new Error("All AI providers failed. Check API keys and network connectivity.")
+}
+
+/**
+ * Creates an inpainting mask PNG for AI inpainting APIs.
+ * The mask must be the exact same dimensions as the input image.
+ * Supports both OpenAI (transparent=editable) and Stability (may require inversion).
+ * 
+ * IMPORTANT: Mask semantics vary by provider:
+ * - OpenAI: TRANSPARENT pixels (alpha=0) = editable, OPAQUE (alpha=255) = preserved
+ * - Stability: May require WHITE pixels = editable, BLACK = preserved (inverted)
+ * 
+ * Mask strategy:
+ * - Opaque black background everywhere (preserved)
+ * - Transparent/white rectangle in bottom 65% + center 80% width (editable region for furniture)
+ */
+async function createInpaintingMask(
+  imageBuffer: Buffer, 
+  requestId: string,
+  invertForStability: boolean = false
+): Promise<Buffer> {
+  try {
+    // Get image dimensions using sharp
+    const imageMetadata = await sharp(imageBuffer).metadata()
+    const width = imageMetadata.width || 1024
+    const height = imageMetadata.height || 1024
+    
+    console.log(`[${requestId}] Creating inpainting mask`, {
+      width,
+      height,
+    })
+    
+    // Define editable region (where furniture will be placed):
+    // - Bottom 65% of image (floor area)
+    // - Center 80% width (avoid edges)
+    const topPreserveHeight = Math.floor(height * 0.35) // Top 35% preserved (ceiling/upper walls)
+    const editableStartY = topPreserveHeight
+    const editableHeight = height - editableStartY // Bottom 65%
+    const centerWidth = Math.floor(width * 0.80) // Center 80% width
+    const centerStartX = Math.floor((width - centerWidth) / 2) // Center horizontally
+    
+    // Create raw RGBA buffer: 4 bytes per pixel (R, G, B, A)
+    const pixelCount = width * height
+    const bufferSize = pixelCount * 4
+    const rawBuffer = Buffer.alloc(bufferSize)
+    
+    // Initialize entire mask based on inversion setting
+    // Default (OpenAI): OPAQUE black = preserved, TRANSPARENT = editable
+    // Inverted (Stability): OPAQUE white = editable, OPAQUE black = preserved
+    const isInverted = invertForStability
+    
+    if (!isInverted) {
+      // OpenAI style: opaque black background (preserved)
+      for (let i = 0; i < pixelCount; i++) {
+        const offset = i * 4
+        rawBuffer[offset] = 0     // R
+        rawBuffer[offset + 1] = 0 // G
+        rawBuffer[offset + 2] = 0 // B
+        rawBuffer[offset + 3] = 255 // A = OPAQUE (preserved)
+      }
+      
+      // Set editable region to TRANSPARENT (alpha=0, RGB=0)
+      for (let y = editableStartY; y < height; y++) {
+        for (let x = centerStartX; x < centerStartX + centerWidth; x++) {
+          const offset = (y * width + x) * 4
+          rawBuffer[offset] = 0     // R
+          rawBuffer[offset + 1] = 0 // G
+          rawBuffer[offset + 2] = 0 // B
+          rawBuffer[offset + 3] = 0 // A = TRANSPARENT (editable)
+        }
+      }
+    } else {
+      // Stability style: opaque black background (preserved), opaque white for editable
+      for (let i = 0; i < pixelCount; i++) {
+        const offset = i * 4
+        rawBuffer[offset] = 0     // R = black (preserved)
+        rawBuffer[offset + 1] = 0 // G = black
+        rawBuffer[offset + 2] = 0 // B = black
+        rawBuffer[offset + 3] = 255 // A = OPAQUE (preserved)
+      }
+      
+      // Set editable region to OPAQUE WHITE (RGB=255, alpha=255)
+      for (let y = editableStartY; y < height; y++) {
+        for (let x = centerStartX; x < centerStartX + centerWidth; x++) {
+          const offset = (y * width + x) * 4
+          rawBuffer[offset] = 255     // R = white (editable)
+          rawBuffer[offset + 1] = 255 // G = white
+          rawBuffer[offset + 2] = 255 // B = white
+          rawBuffer[offset + 3] = 255 // A = OPAQUE (editable - white)
+        }
+      }
+    }
+    
+    // Create PNG from raw RGBA buffer using sharp
+    // Do NOT call blur/flatten/removeAlpha/ensureAlpha - preserve alpha as-is
+    const maskBuffer = await sharp(rawBuffer, {
+      raw: {
+        width,
+        height,
+        channels: 4, // RGBA
+      },
+    })
+      .png()
+      .toBuffer()
+    
+    const editablePercentage = Math.round((centerWidth * editableHeight) / (width * height) * 100)
+    
+    // Compute mask stats for logging
+    const maskMetadata = await sharp(maskBuffer).raw().toBuffer({ resolveWithObject: true })
+    const maskPixels = maskMetadata.data
+    let transparentCount = 0
+    let whiteCount = 0
+    let blackCount = 0
+    
+    for (let i = 0; i < maskPixels.length; i += 4) {
+      const r = maskPixels[i]
+      const g = maskPixels[i + 1]
+      const b = maskPixels[i + 2]
+      const a = maskPixels[i + 3]
+      
+      if (a === 0) {
+        transparentCount++
+      } else if (r === 255 && g === 255 && b === 255) {
+        whiteCount++ // White = editable (inverted mode)
+      } else if (r === 0 && g === 0 && b === 0) {
+        blackCount++ // Black = preserved
+      }
+    }
+    
+    const totalPixels = maskPixels.length / 4
+    const maskMode = isInverted ? "inverted (white=edit, black=preserve)" : "standard (transparent=edit, opaque=preserve)"
+    
+    console.log(`[${requestId}] Inpainting mask created`, {
+      width,
+      height,
+      editableRegion: {
+        x: centerStartX,
+        y: editableStartY,
+        width: centerWidth,
+        height: editableHeight,
+        coverage: `${editablePercentage}%`,
+      },
+      maskSize: maskBuffer.length,
+      maskMode,
+      inverted: isInverted,
+      maskStats: {
+        editablePixels: isInverted ? whiteCount : transparentCount,
+        preservedPixels: blackCount,
+        editablePercent: ((isInverted ? whiteCount : transparentCount) / totalPixels * 100).toFixed(2) + "%",
+        preservedPercent: (blackCount / totalPixels * 100).toFixed(2) + "%",
+      },
+    })
+    
+    // Save debug artifacts in dev mode
+    if (process.env.NODE_ENV === "development" || process.env.SAVE_DEBUG_ARTIFACTS === "true") {
+      try {
+        const uploadsDir = join(process.cwd(), "public", "uploads")
+        if (!existsSync(uploadsDir)) {
+          await mkdir(uploadsDir, { recursive: true })
+        }
+        
+        // Save mask
+        const maskDebugPath = join(uploadsDir, `debug-mask-${requestId}.png`)
+        await writeFile(maskDebugPath, maskBuffer)
+        
+        // Save composite preview (input image with mask overlay)
+        // First apply mask with transparency, then overlay on original
+        const maskOverlay = await sharp(maskBuffer)
+          .resize(width, height)
+          .toBuffer()
+        
+        const compositeBuffer = await sharp(imageBuffer)
+          .composite([{
+            input: maskOverlay,
+            blend: "over",
+          }])
+          .png()
+          .toBuffer()
+        
+        const compositePath = join(uploadsDir, `debug-composite-${requestId}.png`)
+        await writeFile(compositePath, compositeBuffer)
+        
+        console.log(`[${requestId}] Debug artifacts saved`, {
+          mask: maskDebugPath,
+          composite: compositePath,
+        })
+      } catch (debugError: any) {
+        console.warn(`[${requestId}] Failed to save debug artifacts:`, debugError.message)
+      }
+    }
+    
+    return maskBuffer
+  } catch (error: any) {
+    console.error(`[${requestId}] Error creating inpainting mask:`, error)
+    throw new Error(`Failed to create inpainting mask: ${error.message}`)
+  }
+}
+
+/**
+ * Generate staged image using OpenAI Images Edits API (inpainting)
+ * This function FORCES a real inpainting edit by:
+ * - Using the images.edits endpoint with both image and mask
+ * - Using a non-negotiable explicit prompt
+ * - Validating output before returning
+ */
+async function generateWithOpenAI(
+  imageUrl: string,
+  prompt: string,
+  requestId: string
+): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY not set")
+  }
+
+  // Resolve image path to absolute file path
+  let imagePath: string
+  if (imageUrl.startsWith("/uploads/") || imageUrl.startsWith("/images/")) {
+    imagePath = join(process.cwd(), "public", imageUrl)
+  } else if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+    // Fetch remote image
+    const response = await fetch(imageUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: HTTP ${response.status}`)
+    }
+    const arrayBuffer = await response.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+    
+    // Save temporarily to use with OpenAI
+    const tempPath = join(process.cwd(), "public", "uploads", `temp_${Date.now()}.png`)
+    await writeFile(tempPath, buffer)
+    imagePath = tempPath
+  } else {
+    throw new Error(`Invalid image URL format: ${imageUrl}`)
+  }
+
+  if (!existsSync(imagePath)) {
+    throw new Error(`Image file not found: ${imagePath}`)
+  }
+
+  // Read image file
+  const imageBuffer = readFileSync(imagePath)
+  
+  // Compute SHA256 hash of input image for no-op detection
+  const inputHash = createHash("sha256").update(imageBuffer).digest("hex")
+  console.log(`[${requestId}] Input image hash`, {
+    hash: inputHash.substring(0, 16) + "...",
+    size: imageBuffer.length,
+  })
+  
+  // OpenAI Images Edits API requires images in RGBA, LA, or L format
+  // Convert the input image to RGBA format
+  console.log(`[${requestId}] Converting image to RGBA format`)
+  const rgbaImageBuffer = await sharp(imageBuffer)
+    .ensureAlpha() // Ensure alpha channel exists (converts RGB to RGBA)
+    .png()
+    .toBuffer()
+  
+  console.log(`[${requestId}] Image converted to RGBA`, {
+    originalSize: imageBuffer.length,
+    rgbaSize: rgbaImageBuffer.length,
+  })
+  
+  // For OpenAI Images Edits API (inpainting), we need a transparency-based mask:
+  // - TRANSPARENT pixels (alpha=0) = editable region (where furniture will be added)
+  // - OPAQUE pixels (alpha=255) = preserved region (walls, ceiling, windows)
+  const uploadsDir = join(process.cwd(), "public", "uploads")
+  if (!existsSync(uploadsDir)) {
+    await mkdir(uploadsDir, { recursive: true })
+  }
+  
+  const maskPath = join(uploadsDir, `mask_${Date.now()}.png`)
+  
+  // Create an inpainting mask PNG with transparent editable region
+  // The mask must be in RGBA format with same dimensions as the image
+  const inpaintingMaskBuffer = await createInpaintingMask(rgbaImageBuffer, requestId)
+  await writeFile(maskPath, inpaintingMaskBuffer)
+  
+  // Log mask alpha statistics
+  try {
+    const maskMetadata = await sharp(inpaintingMaskBuffer).raw().toBuffer({ resolveWithObject: true })
+    const maskPixels = maskMetadata.data
+    let transparentCount = 0
+    let opaqueCount = 0
+    // RGBA format: every 4th byte (index 3, 7, 11, ...) is alpha
+    for (let i = 3; i < maskPixels.length; i += 4) {
+      if (maskPixels[i] === 0) {
+        transparentCount++
+      } else if (maskPixels[i] === 255) {
+        opaqueCount++
+      }
+    }
+    const totalPixels = maskPixels.length / 4
+    console.log(`[${requestId}] Mask alpha statistics`, {
+      totalPixels,
+      transparentPixels: transparentCount,
+      opaquePixels: opaqueCount,
+      transparentPercent: ((transparentCount / totalPixels) * 100).toFixed(2) + "%",
+      opaquePercent: ((opaqueCount / totalPixels) * 100).toFixed(2) + "%",
+    })
+  } catch (maskStatsError) {
+    console.warn(`[${requestId}] Failed to compute mask alpha stats:`, maskStatsError)
+  }
+  
+  // OVERWRITE prompt with non-negotiable explicit instructions (ignore original prompt parameter)
+  // This ensures we ALWAYS get furniture added, not just style changes
+  const explicitPrompt = `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged. Keep walls/lighting/layout consistent; only change within the editable region. Photorealistic. No text, no watermark.`
+  
+  console.log(`[${requestId}] Calling OpenAI images.edits (inpaint)`, {
+    originalPromptLength: prompt.length,
+    explicitPromptLength: explicitPrompt.length,
+    imageSize: rgbaImageBuffer.length,
+    maskSize: inpaintingMaskBuffer.length,
+  })
+
+  try {
+    // Use multipart/form-data for OpenAI Images Edits API (Node.js compatible)
+    const boundary = `----WebKitFormBoundary${randomBytes(16).toString("hex")}`
+    const formDataParts: Buffer[] = []
+
+    // Add image (must be RGBA format)
+    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
+    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="image"; filename="room.png"\r\n`))
+    formDataParts.push(Buffer.from(`Content-Type: image/png\r\n\r\n`))
+    formDataParts.push(rgbaImageBuffer) // Use RGBA converted image
+    formDataParts.push(Buffer.from(`\r\n`))
+
+    // Add mask (must be same size as image, with transparent region for editing)
+    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
+    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="mask"; filename="mask.png"\r\n`))
+    formDataParts.push(Buffer.from(`Content-Type: image/png\r\n\r\n`))
+    formDataParts.push(inpaintingMaskBuffer)
+    formDataParts.push(Buffer.from(`\r\n`))
+
+    // Add prompt (use explicit non-negotiable prompt)
+    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
+    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="prompt"\r\n\r\n`))
+    formDataParts.push(Buffer.from(explicitPrompt))
+    formDataParts.push(Buffer.from(`\r\n`))
+
+    // Add n
+    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
+    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="n"\r\n\r\n`))
+    formDataParts.push(Buffer.from("1"))
+    formDataParts.push(Buffer.from(`\r\n`))
+
+    // Add size
+    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
+    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="size"\r\n\r\n`))
+    formDataParts.push(Buffer.from("1024x1024"))
+    formDataParts.push(Buffer.from(`\r\n`))
+
+    // Close boundary
+    formDataParts.push(Buffer.from(`--${boundary}--\r\n`))
+
+    const formDataBuffer = Buffer.concat(formDataParts)
+
+    const response = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      },
+      body: formDataBuffer,
+    })
+
+    // Clean up temp files
+    try {
+      if (imagePath.includes("temp_")) {
+        await unlink(imagePath)
+      }
+      await unlink(maskPath)
+    } catch {
+      // Ignore cleanup errors
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      let errorMessage = `OpenAI API error: ${response.status}`
+      try {
+        const errorJson = JSON.parse(errorText)
+        errorMessage += ` - ${errorJson.error?.message || errorText}`
+      } catch {
+        errorMessage += ` - ${errorText.substring(0, 200)}`
+      }
+      console.error(`[${requestId}] OpenAI API error details:`, {
+        status: response.status,
+        statusText: response.statusText,
+        errorPreview: errorText.substring(0, 200),
+      })
+      throw new Error(errorMessage)
+    }
+
+    const data = await response.json()
+    
+    // OpenAI returns { data: [{ url: "https://..." }] }
+    if (data.data && data.data[0] && data.data[0].url) {
+      const returnedImageUrl = data.data[0].url
+      
+      // CRITICAL: Validate output BEFORE returning
+      // Fetch the returned image and validate it
+      console.log(`[${requestId}] Fetching returned image for validation`, {
+        url: returnedImageUrl.substring(0, 50) + "...",
+      })
+      
+      const imageResponse = await fetch(returnedImageUrl)
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to fetch returned image: HTTP ${imageResponse.status}`)
+      }
+      
+      const outputArrayBuffer = await imageResponse.arrayBuffer()
+      const outputBuffer = Buffer.from(outputArrayBuffer)
+      const outputSize = outputBuffer.length
+      
+      // Log output file size and first 8 bytes
+      const first8Bytes = Array.from(outputBuffer.slice(0, 8))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join(" ")
+      console.log(`[${requestId}] Output validation`, {
+        fileSize: outputSize,
+        first8BytesHex: first8Bytes,
+        first8BytesDecimal: Array.from(outputBuffer.slice(0, 8)).join(", "),
+      })
+      
+      // Check 1: Verify PNG signature (89 50 4E 47 0D 0A 1A 0A) or JPEG signature (FF D8 FF)
+      const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+      const jpegSignature = Buffer.from([0xFF, 0xD8, 0xFF])
+      const isValidPNG = outputBuffer.slice(0, 8).equals(pngSignature)
+      const isValidJPEG = outputBuffer.slice(0, 3).equals(jpegSignature)
+      
+      if (!isValidPNG && !isValidJPEG) {
+        console.error(`[${requestId}] OUTPUT_INVALID_FORMAT: Not a valid PNG or JPEG`, {
+          first8BytesHex: first8Bytes,
+          expectedPNG: "89 50 4E 47 0D 0A 1A 0A",
+          expectedJPEG: "FF D8 FF",
+        })
+        throw new Error("OUTPUT_INVALID_FORMAT: Returned image is not a valid PNG or JPEG")
+      }
+      
+      // Check 2: Reject if file size < 50KB
+      if (outputSize < 50 * 1024) {
+        console.error(`[${requestId}] OUTPUT_TOO_SMALL: File size ${outputSize} bytes < 50KB`, {
+          fileSize: outputSize,
+          minSize: 50 * 1024,
+        })
+        throw new Error(`OUTPUT_TOO_SMALL: Returned image is too small (${outputSize} bytes < 50KB)`)
+      }
+      
+      // Check 3: Compare input hash vs output hash (quick check: first 100KB)
+      const inputFirst100KB = imageBuffer.slice(0, Math.min(100 * 1024, imageBuffer.length))
+      const outputFirst100KB = outputBuffer.slice(0, Math.min(100 * 1024, outputBuffer.length))
+      
+      if (inputFirst100KB.length === outputFirst100KB.length && 
+          inputFirst100KB.equals(outputFirst100KB)) {
+        console.error(`[${requestId}] MODEL_RETURNED_UNCHANGED_IMAGE: First 100KB identical`, {
+          inputSize: imageBuffer.length,
+          outputSize: outputSize,
+          first100KBIdentical: true,
+        })
+        throw new Error("MODEL_RETURNED_UNCHANGED_IMAGE: First 100KB of output matches input (likely unchanged)")
+      }
+      
+      // Check 4: Full hash comparison
+      const outputHash = createHash("sha256").update(outputBuffer).digest("hex")
+      if (inputHash === outputHash) {
+        console.error(`[${requestId}] MODEL_RETURNED_UNCHANGED_IMAGE: Full hash identical`, {
+          inputHash: inputHash.substring(0, 16) + "...",
+          outputHash: outputHash.substring(0, 16) + "...",
+        })
+        throw new Error("MODEL_RETURNED_UNCHANGED_IMAGE: Output hash identical to input (unchanged image)")
+      }
+      
+      console.log(`[${requestId}] OpenAI inpainting successful and validated`, {
+        imageUrl: returnedImageUrl.substring(0, 50) + "...",
+        outputSize,
+        inputHash: inputHash.substring(0, 8) + "...",
+        outputHash: outputHash.substring(0, 8) + "...",
+        format: isValidPNG ? "PNG" : "JPEG",
+      })
+      
+      return returnedImageUrl
+    }
+
+    console.error(`[${requestId}] OpenAI returned invalid response format:`, {
+      hasData: !!data.data,
+      dataLength: data.data?.length,
+      firstItem: data.data?.[0],
+    })
+    throw new Error("OpenAI returned invalid response format")
+  } catch (error: any) {
+    // Clean up temp files on error
+    try {
+      if (imagePath.includes("temp_")) {
+        await unlink(imagePath).catch(() => {})
+      }
+      await unlink(maskPath).catch(() => {})
+    } catch {
+      // Ignore cleanup errors
+    }
+    throw error
+  }
+}
+
+/**
+ * Generate staged image using Gemini (if supported)
+ */
+async function generateWithGemini(
+  imageUrl: string,
+  prompt: string,
+  requestId: string
+): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY not set")
+  }
+
+  // Gemini image generation is not directly supported in the same way as OpenAI
+  // For now, log that Gemini path is not implemented and throw
+  console.warn(`[${requestId}] Gemini image generation not yet implemented`)
+  throw new Error("Gemini image generation not implemented. Use OpenAI or set FORCE_MOCK_AI=true")
+}
+
+export async function POST(request: Request) {
+  const requestId = generateRequestId()
+  
+  try {
+    // Get user context
+    const userContext = await getUserContext()
+    if (!userContext) {
+      console.error(`[${requestId}] Unauthorized: No user context`)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: "Unauthorized. Please sign in.",
+          errorCode: "UNAUTHORIZED",
+          retryable: false,
+          requestId,
+        },
+        { status: 200 } // Return 200 to prevent fetch errors
+      )
+    }
+
+    const { userId } = userContext
+
+    // Parse request body
+    let body: any
+    try {
+      body = await request.json()
+    } catch (error) {
+      console.error(`[${requestId}] Invalid JSON body:`, error)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: "Invalid request body",
+          errorCode: "INVALID_BODY",
+          retryable: false,
+          requestId,
+        },
+        { status: 200 }
+      )
+    }
+
+    const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture } = body
+
+    // Validate required fields
+    if (!style || typeof style !== "string" || style.trim() === "") {
+      console.error(`[${requestId}] Missing or invalid style`)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: "Style is required",
+          errorCode: "MISSING_STYLE",
+          retryable: false,
+          requestId,
+        },
+        { status: 200 }
+      )
+    }
+
+    // Get project and image URL
+    let project: any = null
+    let imageUrl: string | null = null
+
+    // If imageUrl is provided directly, use it (no need to fetch project)
+    if (providedImageUrl && providedImageUrl.trim() !== "" && !providedImageUrl.startsWith("blob:")) {
+      imageUrl = providedImageUrl
+      console.log(`[${requestId}] Using provided imageUrl directly (skipping project fetch)`)
+      
+      // Still fetch project if projectId exists (for saving designs), but don't require it
+      if (projectId) {
+        try {
+          project = await prisma.roomProject.findUnique({
+            where: { id: projectId },
+            select: {
+              id: true,
+              userId: true,
+              imageUrl: true,
+              aiDesignsJson: true,
+            },
+          })
+
+          if (project && project.userId !== userId) {
+            console.error(`[${requestId}] Unauthorized access to project: ${projectId}`)
+            // Don't fail - we have imageUrl, just won't save to project
+            project = null
+          }
+        } catch (error: any) {
+          // Don't fail if project fetch fails - we have imageUrl
+          console.warn(`[${requestId}] Could not fetch project for saving (non-critical):`, error.message)
+          project = null
+        }
+      }
+    } else if (projectId) {
+      // No imageUrl provided - must fetch from project
+      try {
+        project = await prisma.roomProject.findUnique({
+          where: { id: projectId },
+          select: {
+            id: true,
+            userId: true,
+            imageUrl: true,
+            aiDesignsJson: true,
+          },
+        })
+
+        if (!project) {
+          console.error(`[${requestId}] Project not found: ${projectId}`)
+          return NextResponse.json(
+            {
+              success: false,
+              errorMessage: "Project not found",
+              errorCode: "PROJECT_NOT_FOUND",
+              retryable: false,
+              requestId,
+            },
+            { status: 200 }
+          )
+        }
+
+        if (project.userId !== userId) {
+          console.error(`[${requestId}] Unauthorized access to project: ${projectId}`)
+          return NextResponse.json(
+            {
+              success: false,
+              errorMessage: "Unauthorized access to project",
+              errorCode: "UNAUTHORIZED_PROJECT",
+              retryable: false,
+              requestId,
+            },
+            { status: 200 }
+          )
+        }
+
+        imageUrl = project.imageUrl
+      } catch (error: any) {
+        console.error(`[${requestId}] Error fetching project:`, error)
+        return NextResponse.json(
+          {
+            success: false,
+            errorMessage: "Failed to fetch project",
+            errorCode: "PROJECT_FETCH_ERROR",
+            retryable: true,
+            requestId,
+          },
+          { status: 200 }
+        )
+      }
+    }
+
+    // Validate image URL
+    if (!imageUrl || imageUrl.trim() === "" || imageUrl.startsWith("blob:")) {
+      console.error(`[${requestId}] Missing or invalid imageUrl: ${imageUrl}`)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: "Room photo is required. Please upload a room photo first.",
+          errorCode: "MISSING_IMAGE",
+          retryable: false,
+          requestId,
+        },
+        { status: 200 }
+      )
+    }
+
+    // Log request details
+    console.log(`[${requestId}] Starting generation`, {
+      userId,
+      projectId: projectId || "none",
+      style,
+      prompt: prompt || "none",
+      moreFurniture: moreFurniture || false,
+      imageUrl: imageUrl.substring(0, 50) + "...",
+    })
+
+    // Check environment variables
+    const hasStability = !!process.env.STABILITY_API_KEY
+    const hasGemini = !!process.env.GEMINI_API_KEY
+    const hasOpenAI = !!process.env.OPENAI_API_KEY
+    const forceMock = process.env.FORCE_MOCK_AI === "true"
+    
+    // Log environment variable status
+    console.log(`[AI] env`, {
+      hasGemini,
+      hasStability,
+      hasOpenAI,
+      forceMock,
+    })
+    
+    // Determine which provider to use (prioritize Stability + Gemini, fallback to OpenAI)
+    let selectedProvider: "stability" | "openai" | "mock" = "mock"
+    let plannerUsed: "gemini" | "none" = "none"
+    
+    if (forceMock) {
+      selectedProvider = "mock"
+    } else if (hasStability && hasGemini) {
+      // Preferred: Gemini planner + Stability renderer
+      selectedProvider = "stability"
+      plannerUsed = "gemini"
+    } else if (hasStability) {
+      // Stability without Gemini planner (use simple prompt)
+      selectedProvider = "stability"
+      plannerUsed = "none"
+    } else if (hasOpenAI) {
+      // Fallback to OpenAI
+      selectedProvider = "openai"
+      plannerUsed = "none"
+    }
+
+    console.log(`[${requestId}] Provider selection`, {
+      hasStabilityKey: hasStability,
+      hasGeminiKey: hasGemini,
+      hasOpenAIKey: hasOpenAI,
+      forceMock,
+      selectedProvider,
+      plannerUsed,
+    })
+    
+    // Validate required keys before attempting generation
+    if (selectedProvider === "stability" && plannerUsed === "gemini") {
+      // Both keys required for Gemini + Stability pipeline
+      if (!hasGemini) {
+        console.error(`[${requestId}] Missing required GEMINI_API_KEY for planner`)
+        return NextResponse.json(
+          {
+            success: false,
+            errorMessage: "Missing GEMINI_API_KEY. Please configure the API key in your environment variables.",
+            errorCode: "MISSING_GEMINI_KEY",
+            retryable: false,
+            requestId,
+          },
+          { status: 500 }
+        )
+      }
+      if (!hasStability) {
+        console.error(`[${requestId}] Missing required STABILITY_API_KEY for renderer`)
+        return NextResponse.json(
+          {
+            success: false,
+            errorMessage: "Missing STABILITY_API_KEY. Please configure the API key in your environment variables.",
+            errorCode: "MISSING_STABILITY_KEY",
+            retryable: false,
+            requestId,
+          },
+          { status: 500 }
+        )
+      }
+    } else if (selectedProvider === "stability" && plannerUsed === "none") {
+      // Only Stability key required
+      if (!hasStability) {
+        console.error(`[${requestId}] Missing required STABILITY_API_KEY for renderer`)
+        return NextResponse.json(
+          {
+            success: false,
+            errorMessage: "Missing STABILITY_API_KEY. Please configure the API key in your environment variables.",
+            errorCode: "MISSING_STABILITY_KEY",
+            retryable: false,
+            requestId,
+          },
+          { status: 500 }
+        )
+      }
+    }
+
+    if (selectedProvider === "mock" && !forceMock) {
+      console.warn(`[${requestId}] No AI provider configured. Using mock generation.`)
+    }
+
+    // Read image from disk for processing
+    let imageBuffer: Buffer
+    let inputHash: string
+    try {
+      if (imageUrl.startsWith("/uploads/") || imageUrl.startsWith("/images/")) {
+        const imagePath = join(process.cwd(), "public", imageUrl)
+        if (!existsSync(imagePath)) {
+          throw new Error(`Image file not found: ${imagePath}`)
+        }
+        imageBuffer = readFileSync(imagePath)
+        inputHash = createHash("sha256").update(imageBuffer).digest("hex")
+      } else if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+        // Fetch remote image
+        const response = await fetch(imageUrl)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image: HTTP ${response.status}`)
+        }
+        const arrayBuffer = await response.arrayBuffer()
+        imageBuffer = Buffer.from(arrayBuffer)
+        inputHash = createHash("sha256").update(imageBuffer).digest("hex")
+      } else {
+        throw new Error(`Invalid image URL format: ${imageUrl}`)
+      }
+
+      console.log(`[${requestId}] Image loaded`, {
+        imageSize: imageBuffer.length,
+        inputHash: inputHash.substring(0, 16) + "...",
+      })
+    } catch (error: any) {
+      console.error(`[${requestId}] Failed to load image:`, error)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: `Failed to load image: ${error.message || "Unknown error"}`,
+          errorCode: "IMAGE_LOAD_FAILED",
+          retryable: false,
+          requestId,
+        },
+        { status: 200 }
+      )
+    }
+
+    // Generate image with retry
+    let generatedImageBuffer: Buffer | null = null
+    let actualProviderUsed: "stability" | "openai" | "mock" = selectedProvider
+    let actualPlannerUsed: "gemini" | "none" = plannerUsed
+    
+    try {
+      if (selectedProvider === "stability") {
+        // Try Gemini planner + Stability renderer
+        try {
+          if (plannerUsed === "gemini") {
+            // Validate keys before calling
+            if (!hasGemini) {
+              throw new Error("GEMINI_API_KEY not set")
+            }
+            if (!hasStability) {
+              throw new Error("STABILITY_API_KEY not set")
+            }
+            
+            console.log(`[${requestId}] Using Gemini planner + Stability renderer`)
+            
+            // Try Gemini planner with fallback
+            let plan: PlannerResult
+            try {
+              const imageBase64 = imageBuffer.toString("base64")
+              plan = await planRoomDesign({
+                style,
+                prompt: prompt,
+                imageBase64,
+                moreFurniture: moreFurniture || false,
+                requestId,
+              })
+            } catch (geminiError: any) {
+              console.warn(`[${requestId}] Gemini planner failed, using fallback plan:`, geminiError.message)
+              // Use fallback plan so Stability can still run
+              plan = createFallbackPlan({
+                style,
+                prompt: prompt,
+                moreFurniture: moreFurniture || false,
+              })
+            }
+
+            // Build final prompt with plan
+            const planJsonText = JSON.stringify(plan.planJson, null, 2)
+            const finalPrompt = `Edit this exact room photo. Add furniture per plan. Keep perspective and walls/floor. Must visibly change room.
+
+Staging Plan:
+${planJsonText}`
+
+            // Check if mask inversion is enabled for Stability
+            const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false" // Default to true
+            const maskForStability = await createInpaintingMask(
+              imageBuffer,
+              requestId,
+              stabilityMaskInvert
+            )
+            
+            // Use stronger default for Stability (0.8) for more visible changes
+            const stabilityStrength = parseFloat(process.env.STABILITY_STRENGTH || "0.8")
+            
+            generatedImageBuffer = await renderWithStability({
+              imageBuffer,
+              prompt: finalPrompt,
+              strength: stabilityStrength,
+              maskBuffer: maskForStability,
+              requestId,
+            })
+            actualPlannerUsed = "gemini"
+          } else {
+            // Stability without Gemini (simpler prompt)
+            // Validate key before calling
+            if (!hasStability) {
+              throw new Error("STABILITY_API_KEY not set")
+            }
+            
+            console.log(`[${requestId}] Using Stability renderer (no planner)`)
+            const simplePrompt = `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Keep perspective and walls/floor. Must visibly change room.`
+            
+            // Check if mask inversion is enabled for Stability
+            const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false" // Default to true
+            const maskForStability = await createInpaintingMask(
+              imageBuffer,
+              requestId,
+              stabilityMaskInvert
+            )
+            
+            // Use stronger default for Stability (0.8) for more visible changes
+            const stabilityStrength = parseFloat(process.env.STABILITY_STRENGTH || "0.8")
+            
+            generatedImageBuffer = await renderWithStability({
+              imageBuffer,
+              prompt: simplePrompt,
+              strength: stabilityStrength,
+              maskBuffer: maskForStability,
+              requestId,
+            })
+          }
+        } catch (stabilityError: any) {
+          console.warn(`[${requestId}] Stability AI failed, falling back to OpenAI:`, stabilityError.message)
+          // Fallback to OpenAI
+          if (hasOpenAI) {
+            const result = await generateWithOpenAI(imageUrl, `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`, requestId)
+            generatedImageBuffer = null // Will be fetched from URL
+            actualProviderUsed = "openai"
+            actualPlannerUsed = "none"
+            // Will handle URL in save step
+          } else {
+            throw stabilityError
+          }
+        }
+      } else if (selectedProvider === "openai") {
+        // Use existing OpenAI pipeline
+        const result = await generateWithOpenAI(imageUrl, `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`, requestId)
+        generatedImageBuffer = null // Will be fetched from URL
+        actualProviderUsed = "openai"
+      } else {
+        // Mock mode
+        generatedImageBuffer = null
+        actualProviderUsed = "mock"
+      }
+    } catch (error: any) {
+      console.error(`[${requestId}] Generation failed:`, error)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: `Failed to generate image: ${error.message || "Unknown error"}`,
+          errorCode: "GENERATION_FAILED",
+          retryable: true,
+          requestId,
+        },
+        { status: 200 }
+      )
+    }
+
+    // Generate filename
+    const sanitizedStyle = style.replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase()
+    const filename = `design-${Date.now()}-${sanitizedStyle}.png`
+
+    // Save image to disk (handles both remote URLs and base64)
+    let generatedImageUrl: string
+    let fallbackUsed = false
+    try {
+      // Handle Stability AI buffer output
+      if (generatedImageBuffer) {
+        // Validate output buffer
+        if (generatedImageBuffer.length < 200 * 1024) {
+          throw new Error(`Output too small: ${generatedImageBuffer.length} bytes < 200KB`)
+        }
+
+        // Check PNG signature (89 50 4E 47) or JPEG signature (FF D8 FF)
+        const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47])
+        const jpegSignature = Buffer.from([0xFF, 0xD8, 0xFF])
+        const isValidPNG = generatedImageBuffer.slice(0, 4).equals(pngSignature)
+        const isValidJPEG = generatedImageBuffer.slice(0, 3).equals(jpegSignature)
+
+        if (!isValidPNG && !isValidJPEG) {
+          throw new Error("Output is not a valid PNG or JPEG")
+        }
+
+        // Save to disk
+        const uploadsDir = join(process.cwd(), "public", "uploads")
+        if (!existsSync(uploadsDir)) {
+          await mkdir(uploadsDir, { recursive: true })
+        }
+        const fullPath = join(uploadsDir, filename)
+        await writeFile(fullPath, generatedImageBuffer)
+
+        // Verify file was saved
+        const savedStats = await stat(fullPath)
+        if (!savedStats.isFile() || savedStats.size < 200 * 1024) {
+          throw new Error(`File verification failed: ${fullPath}`)
+        }
+
+        generatedImageUrl = `/uploads/${filename}`
+
+        console.log(`[${requestId}] Saved Stability AI output`, {
+          provider: actualProviderUsed,
+          planner: actualPlannerUsed,
+          fileSize: savedStats.size,
+          outputHash: createHash("sha256").update(generatedImageBuffer).digest("hex").substring(0, 16) + "...",
+          inputHash: inputHash.substring(0, 16) + "...",
+        })
+      } else if (actualProviderUsed === "openai") {
+        // Handle OpenAI URL output (existing flow)
+        const result = await generateWithOpenAI(imageUrl, `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`, requestId)
+        generatedImageUrl = await saveGeneratedPng({
+          data: result,
+          filename,
+          requestId,
+        })
+      } else if (actualProviderUsed === "mock") {
+        // Handle mock mode: copy a real placeholder PNG
+        fallbackUsed = true
+        // Find a valid placeholder source (prefer dedicated placeholder, then existing design, then fallback)
+        let placeholderSrc: string | null = null
+        
+        // 1. Try dedicated placeholder directory
+        const dedicatedPlaceholder = join(process.cwd(), "public", "placeholders", "design-placeholder.png")
+        if (existsSync(dedicatedPlaceholder)) {
+          placeholderSrc = dedicatedPlaceholder
+        } else {
+          // 2. Try to find an existing design-*.png in uploads (over 1MB)
+          try {
+            const uploadsDir = join(process.cwd(), "public", "uploads")
+            if (existsSync(uploadsDir)) {
+              const files = readdirSync(uploadsDir)
+              const designFiles = files
+                .filter((f) => f.startsWith("design-") && f.endsWith(".png"))
+                .map((f) => {
+                  const filePath = join(uploadsDir, f)
+                  try {
+                    const stats = statSync(filePath)
+                    return { file: f, path: filePath, size: stats.size }
+                  } catch {
+                    return null
+                  }
+                })
+                .filter((f): f is { file: string; path: string; size: number } => f !== null && f.size > 1024 * 1024) // > 1MB
+                .sort((a, b) => b.size - a.size) // Sort by size descending
+              
+              if (designFiles.length > 0) {
+                placeholderSrc = designFiles[0].path
+              }
+            }
+          } catch (error) {
+            // Silently continue to fallback
+          }
+          
+          // 3. Fallback to existing asset
+          if (!placeholderSrc) {
+            placeholderSrc = join(process.cwd(), "public", "images", "skus", "sofas", "sofa_01.png")
+          }
+        }
+        
+        // Ensure source exists
+        if (!placeholderSrc || !existsSync(placeholderSrc)) {
+          throw new Error(`Placeholder source not found: ${placeholderSrc}`)
+        }
+        
+        // Ensure uploads directory exists
+        const uploadsDir = join(process.cwd(), "public", "uploads")
+        if (!existsSync(uploadsDir)) {
+          await mkdir(uploadsDir, { recursive: true })
+        }
+        
+        const fullPath = join(uploadsDir, filename)
+        
+        // Copy the placeholder PNG synchronously
+        copyFileSync(placeholderSrc, fullPath)
+        
+        // CRITICAL: Verify file exists and has valid size after copying
+        const finalStats = await stat(fullPath)
+        if (!finalStats.isFile()) {
+          throw new Error(`File exists but is not a regular file: ${fullPath}`)
+        }
+        if (finalStats.size < 1024) {
+          throw new Error(`File size too small: expected > 1KB, got ${finalStats.size} bytes`)
+        }
+        
+        generatedImageUrl = `/uploads/${filename}`
+        
+        console.log(`[${requestId}] Copied placeholder PNG`, {
+          src: placeholderSrc,
+          dest: fullPath,
+          bytes: finalStats.size,
+          publicUrl: generatedImageUrl,
+          fallbackUsed: true,
+        })
+      } else {
+        // This should not happen - all cases should be handled above
+        throw new Error("No image data to save")
+      }
+    } catch (error: any) {
+      console.error(`[${requestId}] Failed to save generated image:`, error)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: `Failed to save generated image: ${error.message || "Unknown error"}`,
+          errorCode: "SAVE_IMAGE_FAILED",
+          retryable: false,
+          requestId,
+        },
+        { status: 500 }
+      )
+    }
+
+    // CRITICAL: Only proceed if file was verified to exist
+    // Double-check file exists before updating DB or logging success
+    const uploadsDir = join(process.cwd(), "public", "uploads")
+    const fullPath = join(uploadsDir, filename)
+    try {
+      const finalStats = await stat(fullPath)
+      if (!finalStats.isFile()) {
+        throw new Error(`File verification failed: ${fullPath} is not a file`)
+      }
+    } catch (verifyError: any) {
+      console.error(`[${requestId}] Final file verification failed:`, verifyError)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: `Generated file was not found: ${verifyError.message}`,
+          errorCode: "FILE_VERIFICATION_FAILED",
+          retryable: false,
+          requestId,
+        },
+        { status: 500 }
+      )
+    }
+
+    // Save to project if projectId exists (ONLY after file is confirmed)
+    let savedDesignId: string | null = null
+    if (projectId && project) {
+      try {
+        const existingDesigns = (project.aiDesignsJson as any[]) || []
+        const newDesign = {
+          id: `design_${Date.now()}_${randomBytes(4).toString("hex")}`,
+          imageUrl: generatedImageUrl,
+          style,
+          budgetRange: "any",
+          createdAt: new Date().toISOString(),
+        }
+        savedDesignId = newDesign.id
+
+        // Keep only the 12 most recent designs
+        const updatedDesigns = [newDesign, ...existingDesigns].slice(0, 12)
+
+        // Update lastAiSettings
+        const lastAiSettings = {
+          style,
+          budgetRange: "any",
+          userPrompt: prompt || null,
+          updatedAt: new Date().toISOString(),
+        }
+
+        await prisma.roomProject.update({
+          where: { id: projectId },
+          data: {
+            aiDesignsJson: updatedDesigns,
+            lastAiSettings: lastAiSettings,
+          },
+        })
+
+        console.log(`[${requestId}] Saved design to project`, {
+          projectId,
+          designId: savedDesignId,
+          imageUrl: generatedImageUrl,
+        })
+      } catch (error: any) {
+        console.error(`[${requestId}] Failed to save design to project:`, error)
+        // Don't fail the request if save fails - still return the image
+      }
+    }
+
+    // ONLY log success after file is confirmed to exist
+    const finalStats = await stat(join(process.cwd(), "public", "uploads", filename))
+    console.log(`[${requestId}] Generation successful`, {
+      provider: actualProviderUsed,
+      fallbackUsed,
+      imageUrl: generatedImageUrl,
+      designId: savedDesignId,
+      fullPath: join(process.cwd(), "public", "uploads", filename),
+      fileSize: finalStats.size,
+      fileVerified: true,
+    })
+
+    return NextResponse.json({
+      success: true,
+      images: [generatedImageUrl],
+      imageUrl: generatedImageUrl, // Also include as imageUrl for convenience
+      designId: savedDesignId, // Include the saved design ID if available
+      providerUsed: actualProviderUsed,
+      fallbackUsed,
+      requestId,
+    })
+  } catch (error: any) {
+    console.error(`[${requestId}] Unhandled error:`, error)
+    return NextResponse.json(
+      {
+        success: false,
+        errorMessage: error.message || "Internal server error",
+        errorCode: "INTERNAL_ERROR",
+        retryable: true,
+        requestId,
+      },
+      { status: 200 }
+    )
+  }
+}

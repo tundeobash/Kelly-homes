@@ -80,11 +80,11 @@ export default function RoomEditorClient() {
     const saved = localStorage.getItem("room-editor-scene")
     if (saved) {
       try {
-        const scene: SceneData = JSON.parse(saved)
+        const scene: SceneData = JSON.parse(saved || "{}")
         if (scene.backgroundImage) {
           const img = new window.Image()
           img.crossOrigin = "anonymous"
-          img.src = scene.backgroundImage
+          img.src = scene.backgroundImage || ""
           img.onload = () => {
             setRoomImage(img)
             setRoomImageUrl(scene.backgroundImage)

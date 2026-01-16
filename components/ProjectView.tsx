@@ -14,7 +14,7 @@ import RoomPhotoViewer from "./RoomPhotoViewer"
 import RoomPhotoUploader from "./RoomPhotoUploader"
 import RoomPreviewWithOverlay from "./RoomPreviewWithOverlay"
 import { PlacedItem } from "./RoomPreviewWithOverlay"
-import { catalog } from "@/lib/catalog"
+import { catalog, CatalogItem } from "@/lib/catalog"
 import Link from "next/link"
 import { Sparkles, ShoppingCart, X } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -40,29 +40,45 @@ export default function ProjectView({
   const [currentImageUrl, setCurrentImageUrl] = useState(project.imageUrl || "")
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([])
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
-  const [aiDesigns, setAiDesigns] = useState(project.aiDesigns || [])
+  // Use safe accessor for designs: project.designs ?? project.aiDesigns ?? []
+  // normalizeProject returns aiDesigns, but API might return designs
+  const initialDesigns = (project.designs ?? project.aiDesigns ?? []) as any[]
+  const [aiDesigns, setAiDesigns] = useState(initialDesigns)
   const [selectedAiDesignId, setSelectedAiDesignId] = useState(project.selectedAiDesignId || null)
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null)
 
   // Update AI designs when project changes
   useEffect(() => {
-    if (project.aiDesigns) {
-      setAiDesigns(project.aiDesigns)
-    }
+    // Use safe accessor for designs (normalizeProject returns aiDesigns, but API might return designs)
+    const designs = (project.designs ?? project.aiDesigns ?? []) as any[]
+    setAiDesigns(designs)
+    
     if (project.selectedAiDesignId !== undefined) {
       setSelectedAiDesignId(project.selectedAiDesignId)
     }
+    
     // Compute cover image: selected design > first design > room image
     let cover: string | null = null
-    if (project.selectedAiDesignId && project.aiDesigns) {
-      const selected = project.aiDesigns.find((d: any) => d.id === project.selectedAiDesignId)
+    if (project.selectedAiDesignId && designs.length > 0) {
+      const selected = designs.find((d: any) => d.id === project.selectedAiDesignId)
       if (selected) cover = selected.imageUrl
     }
-    if (!cover && project.aiDesigns && project.aiDesigns.length > 0) {
-      cover = project.aiDesigns[0].imageUrl
+    if (!cover && designs.length > 0) {
+      cover = designs[0].imageUrl
     }
     if (!cover) cover = project.imageUrl || null
     setCoverImageUrl(cover)
+    
+    // Debug logging
+    if (process.env.NODE_ENV === "development") {
+      console.log("[ProjectView] Project data:", {
+        projectId: project.id,
+        projectImageUrl: project.imageUrl?.substring(0, 50),
+        designsCount: designs.length,
+        firstDesignUrl: designs[0]?.imageUrl?.substring(0, 50),
+        selectedAiDesignId: project.selectedAiDesignId,
+      })
+    }
   }, [project])
 
   useEffect(() => {
@@ -71,7 +87,7 @@ export default function ProjectView({
       const saved = localStorage.getItem(storageKey)
       if (saved) {
         try {
-          const data = JSON.parse(saved)
+          const data = JSON.parse(saved || "{}")
           if (data.placedItems && Array.isArray(data.placedItems)) {
             setPlacedItems(data.placedItems)
             if (data.selectedItemId) {
@@ -141,7 +157,11 @@ export default function ProjectView({
     setLoading(true)
     try {
       const { generateSkuRecommendations } = await import("@/lib/recommendations")
-      const recommendedSkus = generateSkuRecommendations()
+      const recommendedSkus = await generateSkuRecommendations({
+        projectId: project.id,
+        style: project.style,
+        roomType: project.roomType,
+      })
       
       // Create placed items from recommended SKUs
       const newPlacedItems = recommendedSkus.map((sku, index) => {
@@ -164,7 +184,7 @@ export default function ProjectView({
         
         return {
           id: crypto.randomUUID(),
-          skuId: sku.id,
+          skuId: sku.skuId,
           x,
           y,
           scale: 40,
@@ -180,8 +200,22 @@ export default function ProjectView({
       setPlacedItems([...placedItems, ...newPlacedItems])
       setSelectedItemId(newPlacedItems[0]?.id || null)
       
-      // Store recommended SKUs for display
-      setRecommendedSkus(recommendedSkus)
+      // Store recommended SKUs for display - convert to CatalogItem format
+      const catalogItems: CatalogItem[] = recommendedSkus.map((sku) => {
+        const catalogItem = Object.values(catalog).flat().find((item) => item.id === sku.skuId)
+        if (catalogItem) return catalogItem
+        // Fallback if not found in catalog
+        return {
+          id: sku.skuId,
+          name: sku.name,
+          category: sku.category,
+          imagePath: sku.imageUrl,
+          price: sku.price,
+          seller: sku.seller || "Kelly Homes",
+          dimensions: { w: 0, d: 0, h: 0 },
+        } as CatalogItem
+      })
+      setRecommendedSkus(catalogItems)
     } catch (error) {
       console.error("Error generating recommendation:", error)
     } finally {
@@ -480,13 +514,19 @@ export default function ProjectView({
                 <CardContent>
                   <AiDesignGallery
                     projectId={project.id}
-                    aiDesigns={aiDesigns.map((d: any) => ({
-                      id: d.id,
-                      imageUrl: d.imageUrl,
-                      style: d.style,
-                      budgetRange: d.budgetRange,
-                      createdAt: d.createdAt,
-                    }))}
+                    aiDesigns={aiDesigns
+                      .filter((d: any) => d.imageUrl && !d.imageUrl.includes("/uploads/generated_"))
+                      .map((d: any) => {
+                        // Add cache buster
+                        const bust = (url: string) => url ? `${url.split("?")[0]}?v=${Date.now()}` : url
+                        return {
+                          id: d.id,
+                          imageUrl: bust(d.imageUrl),
+                          style: d.style,
+                          budgetRange: d.budgetRange,
+                          createdAt: d.createdAt,
+                        }
+                      })}
                     selectedAiDesignId={selectedAiDesignId || undefined}
                   />
                 </CardContent>

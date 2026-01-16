@@ -1,0 +1,14 @@
+# Query: gemini-1.5-flash
+# ContextLines: 1
+
+2 results - 2 files
+
+app/api/health/gemini/route.ts:
+  35      const genAI = new GoogleGenerativeAI(apiKey)
+  36:     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" })
+  37  
+
+lib/ai/geminiPlanner.ts:
+  47      const genAI = new GoogleGenerativeAI(geminiKey)
+  48:     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" })
+  49  
