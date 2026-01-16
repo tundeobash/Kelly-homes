@@ -10,6 +10,7 @@ import { createHash } from "crypto"
 import sharp from "sharp"
 import { planRoomDesign, createFallbackPlan, PlannerResult } from "@/lib/ai/geminiPlanner"
 import { renderWithStability } from "@/lib/ai/stabilityRenderer"
+import { stylePrompts } from "@/lib/stylePrompts"
 
 // Ensure Node.js runtime for Gemini calls
 export const runtime = "nodejs"
@@ -450,7 +451,8 @@ async function createInpaintingMask(
 async function generateWithOpenAI(
   imageUrl: string,
   prompt: string,
-  requestId: string
+  requestId: string,
+  negativePrompt?: string
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -546,13 +548,20 @@ async function generateWithOpenAI(
     console.warn(`[${requestId}] Failed to compute mask alpha stats:`, maskStatsError)
   }
   
-  // OVERWRITE prompt with non-negotiable explicit instructions (ignore original prompt parameter)
-  // This ensures we ALWAYS get furniture added, not just style changes
-  const explicitPrompt = `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged. Keep walls/lighting/layout consistent; only change within the editable region. Photorealistic. No text, no watermark.`
+  // Use provided prompt (should already be resolved with style prompts)
+  // If prompt is empty or "none", use fallback
+  const resolvedPrompt = prompt && prompt !== "none" && prompt.trim() !== ""
+    ? prompt
+    : `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged. Keep walls/lighting/layout consistent; only change within the editable region. Photorealistic. No text, no watermark.`
+  
+  // Append negative prompt if provided
+  const finalPrompt = negativePrompt 
+    ? `${resolvedPrompt}\n\nNegative prompts:\n${negativePrompt}`
+    : resolvedPrompt
   
   console.log(`[${requestId}] Calling OpenAI images.edits (inpaint)`, {
     originalPromptLength: prompt.length,
-    explicitPromptLength: explicitPrompt.length,
+    resolvedPromptLength: finalPrompt.length,
     imageSize: rgbaImageBuffer.length,
     maskSize: inpaintingMaskBuffer.length,
   })
@@ -576,10 +585,10 @@ async function generateWithOpenAI(
     formDataParts.push(inpaintingMaskBuffer)
     formDataParts.push(Buffer.from(`\r\n`))
 
-    // Add prompt (use explicit non-negotiable prompt)
+    // Add prompt (use resolved prompt with style prompts)
     formDataParts.push(Buffer.from(`--${boundary}\r\n`))
     formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="prompt"\r\n\r\n`))
-    formDataParts.push(Buffer.from(explicitPrompt))
+    formDataParts.push(Buffer.from(finalPrompt))
     formDataParts.push(Buffer.from(`\r\n`))
 
     // Add n
@@ -805,6 +814,33 @@ export async function POST(request: Request) {
     }
 
     const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture } = body
+
+    // Resolve style to prompt using stylePrompts
+    const styleKey = (style || "").toLowerCase()
+    const stylePrompt = stylePrompts[styleKey]
+    
+    // Handle user prompt: filter out "none" and empty strings
+    const userPrompt = prompt && prompt !== "none" && prompt.trim() !== "" ? prompt.trim() : ""
+    
+    // Build final prompts
+    const finalPositive = [stylePrompt?.positive, userPrompt].filter(Boolean).join("\n\n")
+    const finalNegative = stylePrompt?.negative ?? ""
+    
+    // Debug logging (dev only)
+    if (process.env.NODE_ENV === "development") {
+      const promptSource = stylePrompt 
+        ? (userPrompt ? "merged" : "style-only")
+        : (userPrompt ? "user-only" : "none")
+      
+      console.log(`[${requestId}] Style prompt resolution`, {
+        styleKey,
+        styleFound: !!stylePrompt,
+        promptSource,
+        finalPositiveLength: finalPositive.length,
+        finalNegativeLength: finalNegative.length,
+        hasUserPrompt: !!userPrompt,
+      })
+    }
 
     // Validate required fields
     if (!style || typeof style !== "string" || style.trim() === "") {
@@ -1107,17 +1143,18 @@ export async function POST(request: Request) {
               // Use fallback plan so Stability can still run
               plan = createFallbackPlan({
                 style,
-                prompt: prompt,
+                prompt: finalPositive, // Use resolved style prompt instead of raw prompt
                 moreFurniture: moreFurniture || false,
               })
             }
 
-            // Build final prompt with plan
+            // Build final prompt with plan, incorporating style prompts
             const planJsonText = JSON.stringify(plan.planJson, null, 2)
-            const finalPrompt = `Edit this exact room photo. Add furniture per plan. Keep perspective and walls/floor. Must visibly change room.
+            const stabilityPositive = finalPositive || `Edit this exact room photo. Add furniture per plan. Keep perspective and walls/floor. Must visibly change room.`
+            const stabilityPrompt = `${stabilityPositive}
 
 Staging Plan:
-${planJsonText}`
+${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
 
             // Check if mask inversion is enabled for Stability
             const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false" // Default to true
@@ -1132,7 +1169,7 @@ ${planJsonText}`
             
             generatedImageBuffer = await renderWithStability({
               imageBuffer,
-              prompt: finalPrompt,
+              prompt: stabilityPrompt, // Use resolved prompt with style prompts
               strength: stabilityStrength,
               maskBuffer: maskForStability,
               requestId,
@@ -1146,7 +1183,11 @@ ${planJsonText}`
             }
             
             console.log(`[${requestId}] Using Stability renderer (no planner)`)
-            const simplePrompt = `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Keep perspective and walls/floor. Must visibly change room.`
+            // Use resolved style prompt, or fallback to simple prompt if style not found
+            const stabilityPositive = finalPositive || `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Keep perspective and walls/floor. Must visibly change room.`
+            const simplePrompt = finalNegative 
+              ? `${stabilityPositive}\n\nNegative prompts:\n${finalNegative}`
+              : stabilityPositive
             
             // Check if mask inversion is enabled for Stability
             const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false" // Default to true
@@ -1171,7 +1212,9 @@ ${planJsonText}`
           console.warn(`[${requestId}] Stability AI failed, falling back to OpenAI:`, stabilityError.message)
           // Fallback to OpenAI
           if (hasOpenAI) {
-            const result = await generateWithOpenAI(imageUrl, `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`, requestId)
+            // Use resolved style prompts for OpenAI
+            const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
+            const result = await generateWithOpenAI(imageUrl, openaiPrompt, requestId, finalNegative)
             generatedImageBuffer = null // Will be fetched from URL
             actualProviderUsed = "openai"
             actualPlannerUsed = "none"
@@ -1182,7 +1225,9 @@ ${planJsonText}`
         }
       } else if (selectedProvider === "openai") {
         // Use existing OpenAI pipeline
-        const result = await generateWithOpenAI(imageUrl, `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`, requestId)
+        // Use resolved style prompts for OpenAI
+        const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
+        const result = await generateWithOpenAI(imageUrl, openaiPrompt, requestId, finalNegative)
         generatedImageBuffer = null // Will be fetched from URL
         actualProviderUsed = "openai"
       } else {
@@ -1254,7 +1299,9 @@ ${planJsonText}`
         })
       } else if (actualProviderUsed === "openai") {
         // Handle OpenAI URL output (existing flow)
-        const result = await generateWithOpenAI(imageUrl, `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`, requestId)
+        // Use resolved style prompts for OpenAI
+        const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
+        const result = await generateWithOpenAI(imageUrl, openaiPrompt, requestId, finalNegative)
         generatedImageUrl = await saveGeneratedPng({
           data: result,
           filename,
