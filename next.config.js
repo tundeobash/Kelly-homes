@@ -15,14 +15,9 @@ const nextConfig = {
       },
       {
         protocol: 'https',
-        hostname: '**.amazonaws.com',
+        hostname: '*.amazonaws.com',
         pathname: '/**',
       },
-      // Allow all hosts in development (remove in production)
-      ...(process.env.NODE_ENV === 'development' ? [{
-        protocol: 'https',
-        hostname: '**',
-      }] : []),
     ],
   },
   webpack: (config, { isServer }) => {
