@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server"
-import { writeFile, mkdir } from "fs/promises"
-import { join } from "path"
-import { existsSync } from "fs"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { randomBytes } from "crypto"
+import { put } from "@vercel/blob"
 
 export async function POST(request: Request) {
   try {
@@ -40,30 +38,29 @@ export async function POST(request: Request) {
       )
     }
 
-    // Create uploads directory if it doesn't exist
-    const uploadsDir = join(process.cwd(), "public", "uploads")
-    if (!existsSync(uploadsDir)) {
-      await mkdir(uploadsDir, { recursive: true })
-    }
-
     // Generate unique filename
     const fileExtension = file.name.split(".").pop() || "jpg"
     const filename = `${randomBytes(16).toString("hex")}.${fileExtension}`
-    const filepath = join(uploadsDir, filename)
 
-    // Convert file to buffer and save
+    // Convert file to buffer
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
-    await writeFile(filepath, buffer)
+
+    // Upload to Vercel Blob
+    const blob = await put(`uploads/${filename}`, buffer, {
+      access: "public",
+      contentType: file.type,
+    })
 
     // Return the public URL
-    const url = `/uploads/${filename}`
+    const url = blob.url
 
     return NextResponse.json({ url, imageUrl: url })
   } catch (error) {
     console.error("Error uploading file:", error)
+    const errorMessage = error instanceof Error ? error.message : "Internal server error"
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Internal server error" },
+      { error: errorMessage },
       { status: 500 }
     )
   }
