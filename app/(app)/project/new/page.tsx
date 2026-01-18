@@ -21,9 +21,6 @@ export default function NewProjectPage() {
   const [formData, setFormData] = useState({
     name: "",
     roomType: "",
-    length: "",
-    width: "",
-    height: "",
     image: null as File | null,
   })
 
@@ -76,9 +73,6 @@ export default function NewProjectPage() {
         body: JSON.stringify({
           name: formData.name,
           roomType: formData.roomType,
-          length: parseFloat(formData.length),
-          width: parseFloat(formData.width),
-          height: parseFloat(formData.height),
           imageUrl, // Persistent URL from /api/upload
         }),
       })
@@ -197,51 +191,6 @@ export default function NewProjectPage() {
                   <SelectItem value="kitchen">Kitchen</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="length">Length (ft)</Label>
-                <Input
-                  id="length"
-                  type="number"
-                  step="0.1"
-                  value={formData.length}
-                  onChange={(e) =>
-                    setFormData({ ...formData, length: e.target.value })
-                  }
-                  required
-                  min="1"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="width">Width (ft)</Label>
-                <Input
-                  id="width"
-                  type="number"
-                  step="0.1"
-                  value={formData.width}
-                  onChange={(e) =>
-                    setFormData({ ...formData, width: e.target.value })
-                  }
-                  required
-                  min="1"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="height">Height (ft)</Label>
-                <Input
-                  id="height"
-                  type="number"
-                  step="0.1"
-                  value={formData.height}
-                  onChange={(e) =>
-                    setFormData({ ...formData, height: e.target.value })
-                  }
-                  required
-                  min="1"
-                />
-              </div>
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>

@@ -113,9 +113,9 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { name, roomType, length, width, height, imageUrl } = body
+    const { name, roomType, imageUrl } = body
 
-    if (!name || !roomType || !length || !width || !height || !imageUrl) {
+    if (!name || !roomType || !imageUrl) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
@@ -135,9 +135,9 @@ export async function POST(request: Request) {
         userId: session.user.id,
         name,
         roomType,
-        length: parseFloat(length),
-        width: parseFloat(width),
-        height: parseFloat(height),
+        length: 0,
+        width: 0,
+        height: 0,
         imageUrl,
       },
     })
