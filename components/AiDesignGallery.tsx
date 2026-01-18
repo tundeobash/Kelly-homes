@@ -114,7 +114,6 @@ export default function AiDesignGallery({
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {validDesigns.map((design, index) => {
           const cleanUrl = design.imageUrl.split("?")[0]
-          const displayUrl = getImageUrlWithCacheBuster(design.imageUrl)
           
           return (
             <div
@@ -128,7 +127,7 @@ export default function AiDesignGallery({
                 </div>
               ) : (
                 <Image
-                  src={displayUrl}
+                  src={cleanUrl}
                   alt={design.style || `AI Design ${index + 1}`}
                   fill
                   className="object-cover rounded-lg"
@@ -177,8 +176,8 @@ export default function AiDesignGallery({
                     
                     return (
                       <Image
-                        key={getImageUrlWithCacheBuster(design.imageUrl)} // Force re-render with fresh cache buster
-                        src={getImageUrlWithCacheBuster(design.imageUrl)}
+                        key={cleanUrl}
+                        src={cleanUrl}
                         alt="AI Design"
                         fill
                         className="object-contain"

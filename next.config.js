@@ -19,6 +19,7 @@ const nextConfig = {
         pathname: '/**',
       },
     ],
+    unoptimized: false,
   },
   webpack: (config, { isServer }) => {
     // Ignore canvas module to prevent SSR issues with Konva
