@@ -39,13 +39,16 @@ async function getProfileData(username: string, currentUserId?: string) {
   return null
 }
 
+type PageProps = {
+  params: Promise<{ username: string }>
+}
+
 export default async function ProfilePage({
   params,
-}: {
-  params: { username: string }
-}) {
+}: PageProps) {
+  const { username } = await params
   const userContext = await getUserContext()
-  const profile = await getProfileData(params.username, userContext?.userId)
+  const profile = await getProfileData(username, userContext?.userId)
 
   if (!profile) {
     redirect("/")
@@ -67,7 +70,7 @@ export default async function ProfilePage({
               <ProfileHeaderClient
                 profile={profile}
                 initials={initials}
-                isOwnProfile={params.username === "me"}
+                isOwnProfile={username === "me"}
               />
               <div className="flex-1 text-center md:text-left">
                 <h2 className="text-3xl font-bold mb-2">{profile.name || "User"}</h2>
@@ -121,7 +124,7 @@ export default async function ProfilePage({
                 <ProjectCard
                   key={project.id}
                   project={project}
-                  isOwnProfile={params.username === "me"}
+                  isOwnProfile={username === "me"}
                 />
               ))}
             </div>

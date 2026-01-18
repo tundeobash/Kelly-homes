@@ -7,18 +7,21 @@ import { getCatalogItemById } from "@/lib/catalog"
 import { getSession } from "@/lib/dev-mode"
 import AddToCartButton from "@/components/AddToCartButton"
 
+type PageProps = {
+  params: Promise<{ id: string }>
+}
+
 export default async function ProductDetailPage({
   params,
-}: {
-  params: { id: string }
-}) {
+}: PageProps) {
+  const { id } = await params
   const session = await getSession()
 
   if (!session?.user?.id) {
     redirect("/auth")
   }
 
-  const item = getCatalogItemById(params.id)
+  const item = getCatalogItemById(id)
 
   if (!item) {
     notFound()

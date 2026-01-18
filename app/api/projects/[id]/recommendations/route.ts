@@ -6,9 +6,10 @@ import { generateRecommendation } from "@/lib/recommendation-engine"
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
 
     if (!session?.user?.id) {
@@ -16,7 +17,7 @@ export async function POST(
     }
 
     const project = await prisma.roomProject.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: { user: true },
     })
 

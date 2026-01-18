@@ -68,9 +68,10 @@ function createMockProject(projectId: string, userId: string): any {
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const requestId = generateRequestId()
+  const { id } = await params
   
   try {
     const userContext = await getUserContext()
@@ -86,7 +87,7 @@ export async function GET(
     }
 
     const { userId, isDevMode } = userContext
-    const projectId = params.id
+    const projectId = id
 
     console.log(`[API PROJECT] [${requestId}] Fetch`, {
       projectId,
@@ -213,9 +214,10 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
 
     if (!session?.user?.id) {
@@ -223,7 +225,7 @@ export async function PATCH(
     }
 
     const project = await prisma.roomProject.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!project || project.userId !== session.user.id) {
@@ -268,7 +270,7 @@ export async function PATCH(
     // Update project if there's data to update
     if (Object.keys(updateData).length > 0) {
       const updatedProject = await prisma.roomProject.update({
-        where: { id: params.id },
+        where: { id },
         data: updateData,
       })
 
@@ -294,9 +296,10 @@ export async function PATCH(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
 
     if (!session?.user?.id) {
@@ -304,7 +307,7 @@ export async function DELETE(
     }
 
     const project = await prisma.roomProject.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!project || project.userId !== session.user.id) {
@@ -330,11 +333,11 @@ export async function DELETE(
 
     // Delete the project
     await prisma.roomProject.delete({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (process.env.NODE_ENV === "development") {
-      console.log("[API PROJECTS DELETE] Deleted project:", params.id)
+      console.log("[API PROJECTS DELETE] Deleted project:", id)
     }
 
     return NextResponse.json({ ok: true })

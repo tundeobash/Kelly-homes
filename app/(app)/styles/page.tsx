@@ -5,11 +5,14 @@ import { prisma } from "@/lib/prisma"
 import { designStyles } from "@/lib/mock/styles"
 import StylesClient from "@/components/StylesClient"
 
+type PageProps = {
+  searchParams: Promise<{ projectId?: string }>
+}
+
 export default async function StylesPage({
   searchParams,
-}: {
-  searchParams: { projectId?: string }
-}) {
+}: PageProps) {
+  const { projectId } = await searchParams
   const session = await getServerSession(authOptions)
 
   if (!session?.user?.id) {
@@ -28,7 +31,7 @@ export default async function StylesPage({
       <StylesClient
         styles={designStyles}
         userPreferredStyles={user?.preferredStyles || []}
-        projectId={searchParams.projectId}
+        projectId={projectId}
       />
     </>
   )

@@ -6,11 +6,14 @@ import { generateRecommendation } from "@/lib/recommendation-engine"
 import { normalizeProject } from "@/lib/api/normalize-project"
 import ProjectView from "@/components/ProjectView"
 
+type PageProps = {
+  params: Promise<{ id: string }>
+}
+
 export default async function ProjectPage({
   params,
-}: {
-  params: { id: string }
-}) {
+}: PageProps) {
+  const { id } = await params
   const session = await getServerSession(authOptions)
 
   if (!session?.user?.id) {
@@ -18,7 +21,7 @@ export default async function ProjectPage({
   }
 
   const project = await prisma.roomProject.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       user: true,
       recommendations: {

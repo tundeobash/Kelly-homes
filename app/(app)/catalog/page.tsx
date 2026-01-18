@@ -4,11 +4,14 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import CatalogClient from "@/components/CatalogClient"
 
+type PageProps = {
+  searchParams: Promise<{ style?: string; seller?: string; budget?: string; category?: string }>
+}
+
 export default async function CatalogPage({
   searchParams,
-}: {
-  searchParams: { style?: string; seller?: string; budget?: string; category?: string }
-}) {
+}: PageProps) {
+  const { style, seller, budget, category } = await searchParams
   const session = await getServerSession(authOptions)
 
   if (!session?.user?.id) {
@@ -17,17 +20,17 @@ export default async function CatalogPage({
 
   const where: any = {}
 
-  if (searchParams.style) {
-    where.styleTags = { has: searchParams.style }
+  if (style) {
+    where.styleTags = { has: style }
   }
 
-  if (searchParams.seller) {
-    where.seller = searchParams.seller
+  if (seller) {
+    where.seller = seller
   }
 
-  if (searchParams.budget && searchParams.budget !== "all") {
-    const budget = parseFloat(searchParams.budget)
-    if (budget === 10001) {
+  if (budget && budget !== "all") {
+    const budgetValue = parseFloat(budget)
+    if (budgetValue === 10001) {
       where.price = { gte: 10001 }
     } else {
       // For ranges, calculate min from previous range
@@ -38,16 +41,16 @@ export default async function CatalogPage({
         "5000": { min: 2001, max: 5000 },
         "10000": { min: 5001, max: 10000 },
       }
-      const range = budgetRanges[searchParams.budget]
+      const range = budgetRanges[budget]
       if (range) {
         where.price = { gte: range.min, lte: range.max }
       }
     }
   }
   
-  if (searchParams.category && searchParams.category !== "all") {
+  if (category && category !== "all") {
     // TODO: Add category field to FurnitureItem model or filter by name/description
-    where.name = { contains: searchParams.category, mode: "insensitive" }
+    where.name = { contains: category, mode: "insensitive" }
   }
 
   const items = await prisma.furnitureItem.findMany({

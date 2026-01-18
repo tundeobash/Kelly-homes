@@ -43,12 +43,15 @@ async function getDesignerData(slug: string) {
   }
 }
 
+type PageProps = {
+  params: Promise<{ slug: string }>
+}
+
 export default async function DesignerProfilePage({
   params,
-}: {
-  params: { slug: string }
-}) {
-  const designer = await getDesignerData(params.slug)
+}: PageProps) {
+  const { slug } = await params
+  const designer = await getDesignerData(slug)
 
   if (!designer) {
     redirect("/designers")
