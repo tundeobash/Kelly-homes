@@ -1,0 +1,21 @@
+# Build outputs
+.next
+out
+dist
+
+# Dependencies (Vercel installs these)
+node_modules
+
+# Local env + logs
+.env
+.env.local
+*.log
+
+# Common large folders that break tracing
+uploads
+public/uploads
+tmp
+temp
+
+# OS junk
+.DS_Store
