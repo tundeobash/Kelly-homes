@@ -42,6 +42,13 @@ const nextConfig = {
       })
     }
     
+    // Enforce single React instance to prevent multiple renderer conflicts
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "react$": require.resolve("react"),
+      "react-dom$": require.resolve("react-dom"),
+    }
+    
     return config
   },
 }
