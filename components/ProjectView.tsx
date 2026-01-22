@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -12,13 +13,14 @@ import {
 } from "@/components/ui/select"
 import RoomPhotoViewer from "./RoomPhotoViewer"
 import RoomPhotoUploader from "./RoomPhotoUploader"
-import RoomPreviewWithOverlay from "./RoomPreviewWithOverlay"
 import { PlacedItem } from "./RoomPreviewWithOverlay"
 import { catalog, CatalogItem } from "@/lib/catalog"
 import Link from "next/link"
 import { Sparkles, ShoppingCart, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import AiDesignGallery from "./AiDesignGallery"
+
+const RoomPreviewWithOverlay = dynamic(() => import("./RoomPreviewWithOverlay"), { ssr: false })
 
 interface ProjectViewProps {
   project: any

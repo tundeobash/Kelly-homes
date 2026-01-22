@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import { useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
@@ -151,22 +151,25 @@ export default function RoomPreviewWithOverlay({
       })
       if (res.ok) {
         const data = await res.json()
-        setDepthMap(data.depthMap)
-        setFloorStartY(data.floorStartY)
-        setFloorBoundary(data.floorBoundary)
-      } else {
-        // Fallback to default floor boundary (lower 35%)
-        const defaultFloorY = Math.floor(containerSize.height * 0.65)
-        setFloorStartY(defaultFloorY)
-        setFloorBoundary([
-          { x: 0, y: defaultFloorY },
-          { x: containerSize.width, y: defaultFloorY },
-          { x: containerSize.width, y: containerSize.height },
-          { x: 0, y: containerSize.height },
-        ])
+        if (data.depthMap && data.floorStartY !== undefined && data.floorBoundary) {
+          setDepthMap(data.depthMap)
+          setFloorStartY(data.floorStartY)
+          setFloorBoundary(data.floorBoundary)
+          return
+        }
       }
+      // Fallback to default floor boundary (lower 35%)
+      const defaultFloorY = Math.floor(containerSize.height * 0.65)
+      setFloorStartY(defaultFloorY)
+      setFloorBoundary([
+        { x: 0, y: defaultFloorY },
+        { x: containerSize.width, y: defaultFloorY },
+        { x: containerSize.width, y: containerSize.height },
+        { x: 0, y: containerSize.height },
+      ])
     } catch (error) {
-      console.error("[RoomPreviewWithOverlay] Failed to fetch depth map:", error)
+      // Log but do not throw - gracefully degrade to default
+      console.warn("[RoomPreviewWithOverlay] Depth API unavailable, using defaults:", error)
       // Fallback to default
       const defaultFloorY = Math.floor(containerSize.height * 0.65)
       setFloorStartY(defaultFloorY)
