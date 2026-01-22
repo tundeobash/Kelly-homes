@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,25 +9,7 @@ import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { catalog, CatalogItem } from "@/lib/catalog"
 import { Download, Trash2, ArrowUp, ArrowDown, RotateCw } from "lucide-react"
-
-const Stage = dynamic(() => import("react-konva").then((mod) => mod.Stage), {
-  ssr: false,
-})
-const Layer = dynamic(() => import("react-konva").then((mod) => mod.Layer), {
-  ssr: false,
-})
-const Image = dynamic(() => import("react-konva").then((mod) => mod.Image), {
-  ssr: false,
-})
-const Group = dynamic(() => import("react-konva").then((mod) => mod.Group), {
-  ssr: false,
-})
-const Transformer = dynamic(() => import("react-konva").then((mod) => mod.Transformer), {
-  ssr: false,
-})
-const Rect = dynamic(() => import("react-konva").then((mod) => mod.Rect), {
-  ssr: false,
-})
+import { Stage, Layer, Image, Group, Transformer, Rect } from "@/components/KonvaCanvasClient"
 
 type PlacedItem = {
   id: string

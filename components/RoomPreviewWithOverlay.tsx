@@ -1,18 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react"
-import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
 import { catalog, CatalogItem } from "@/lib/catalog"
 import { X, ArrowUp, ArrowDown, Trash2 } from "lucide-react"
-
-const Stage = dynamic(() => import("react-konva").then((mod) => mod.Stage), { ssr: false })
-const Layer = dynamic(() => import("react-konva").then((mod) => mod.Layer), { ssr: false })
-const KonvaImage = dynamic(() => import("react-konva").then((mod) => mod.Image), { ssr: false })
-const Group = dynamic(() => import("react-konva").then((mod) => mod.Group), { ssr: false })
-const Rect = dynamic(() => import("react-konva").then((mod) => mod.Rect), { ssr: false })
+import { Stage, Layer, Image as KonvaImage, Group, Rect } from "@/components/KonvaCanvasClient"
 
 export type PlacedItem = {
   id: string

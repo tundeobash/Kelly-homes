@@ -1,21 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import dynamic from "next/dynamic"
-
-// Dynamically import Konva only on client side to avoid SSR issues
-const Stage = dynamic(() => import("react-konva").then((mod) => mod.Stage), {
-  ssr: false,
-})
-const Layer = dynamic(() => import("react-konva").then((mod) => mod.Layer), {
-  ssr: false,
-})
-const Image = dynamic(() => import("react-konva").then((mod) => mod.Image), {
-  ssr: false,
-})
-const Group = dynamic(() => import("react-konva").then((mod) => mod.Group), {
-  ssr: false,
-})
+import { Stage, Layer, Image, Group } from "@/components/KonvaCanvasClient"
 
 // TODO: Replace with AR SDK (e.g., AR.js, 8th Wall, or WebXR)
 // This is a 2.5D canvas-based preview - can be upgraded to full AR
