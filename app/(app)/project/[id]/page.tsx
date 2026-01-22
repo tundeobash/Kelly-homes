@@ -1,12 +1,10 @@
 import { redirect } from "next/navigation"
-import dynamic from "next/dynamic"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { generateRecommendation } from "@/lib/recommendation-engine"
 import { normalizeProject } from "@/lib/api/normalize-project"
-
-const ProjectView = dynamic(() => import("@/components/ProjectView"), { ssr: false })
+import ProjectViewClient from "@/components/ProjectViewClient"
 
 type PageProps = {
   params: Promise<{ id: string }>
@@ -74,7 +72,7 @@ export default async function ProjectPage({
   }
 
   return (
-    <ProjectView
+    <ProjectViewClient
       project={projectWithDesigns}
       userPreferences={user?.preferredStyles || []}
       userBudget={user?.budgetMax}
