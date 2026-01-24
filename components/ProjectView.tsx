@@ -42,12 +42,22 @@ export default function ProjectView({
   const [currentImageUrl, setCurrentImageUrl] = useState(project.imageUrl || "")
   const [placedItems, setPlacedItems] = useState<PlacedItem[]>([])
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+  // Delay Konva mount to avoid ReactCurrentBatchConfig crash after navigation
+  const [editorReady, setEditorReady] = useState(false)
   // Use safe accessor for designs: project.designs ?? project.aiDesigns ?? []
   // normalizeProject returns aiDesigns, but API might return designs
   const initialDesigns = (project.designs ?? project.aiDesigns ?? []) as any[]
   const [aiDesigns, setAiDesigns] = useState(initialDesigns)
   const [selectedAiDesignId, setSelectedAiDesignId] = useState(project.selectedAiDesignId || null)
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null)
+
+  // Delay mounting Konva editor until after initial render settles
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setEditorReady(true)
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [])
 
   // Update AI designs when project changes
   useEffect(() => {
@@ -253,17 +263,23 @@ export default function ProjectView({
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <RoomPreviewWithOverlay
-                  roomImage={currentImageUrl || ""}
-                  projectId={project.id}
-                  placedItems={placedItems}
-                  selectedItemId={selectedItemId}
-                  onPlacedItemsChange={setPlacedItems}
-                  onSelectedItemChange={setSelectedItemId}
-                  onAddItem={handleAddItem}
-                  onDeleteItem={handleDeleteItem}
-                  onClearAll={handleClearAll}
-                />
+                {editorReady ? (
+                  <RoomPreviewWithOverlay
+                    roomImage={currentImageUrl || ""}
+                    projectId={project.id}
+                    placedItems={placedItems}
+                    selectedItemId={selectedItemId}
+                    onPlacedItemsChange={setPlacedItems}
+                    onSelectedItemChange={setSelectedItemId}
+                    onAddItem={handleAddItem}
+                    onDeleteItem={handleDeleteItem}
+                    onClearAll={handleClearAll}
+                  />
+                ) : (
+                  <div className="w-full aspect-video bg-gray-100 rounded flex items-center justify-center">
+                    <p className="text-muted-foreground">Loading editor…</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
