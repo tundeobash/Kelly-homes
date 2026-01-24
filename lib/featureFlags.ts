@@ -6,4 +6,4 @@
  * 
  * To re-enable Konva rendering, set this to true.
  */
-export const ENABLE_KONVA = true;
+export const ENABLE_KONVA = false;
