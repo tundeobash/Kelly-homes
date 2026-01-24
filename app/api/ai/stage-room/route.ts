@@ -43,6 +43,116 @@ async function retryWithBackoff<T>(
   throw lastError
 }
 
+// Stability AI pixel limit
+const STABILITY_MAX_PIXELS = 9_437_184
+// OpenAI max file size (4MB)
+const OPENAI_MAX_FILE_SIZE = 4 * 1024 * 1024
+
+/**
+ * Normalizes input image for AI providers:
+ * - Converts any format (JPEG, HEIC, etc.) to PNG
+ * - Resizes to meet Stability's pixel limit (9,437,184 pixels max)
+ * - Ensures PNG is under 4MB for OpenAI fallback compatibility
+ */
+async function normalizeInputImage(
+  inputBuffer: Buffer,
+  requestId: string
+): Promise<{ buffer: Buffer; width: number; height: number }> {
+  // Get original metadata
+  const metadata = await sharp(inputBuffer).metadata()
+  const originalWidth = metadata.width || 1024
+  const originalHeight = metadata.height || 1024
+  const originalPixels = originalWidth * originalHeight
+  const originalFormat = metadata.format || "unknown"
+
+  console.log(`[${requestId}] Normalizing input image`, {
+    originalFormat,
+    originalWidth,
+    originalHeight,
+    originalPixels,
+    originalSize: inputBuffer.length,
+  })
+
+  let targetWidth = originalWidth
+  let targetHeight = originalHeight
+
+  // Step 1: Check if resize needed for Stability pixel limit
+  if (originalPixels > STABILITY_MAX_PIXELS) {
+    const scaleFactor = Math.sqrt(STABILITY_MAX_PIXELS / originalPixels)
+    targetWidth = Math.floor(originalWidth * scaleFactor)
+    targetHeight = Math.floor(originalHeight * scaleFactor)
+    
+    // Ensure dimensions are even (required by some encoders)
+    targetWidth = targetWidth - (targetWidth % 2)
+    targetHeight = targetHeight - (targetHeight % 2)
+    
+    console.log(`[${requestId}] Resizing for Stability pixel limit`, {
+      scaleFactor: scaleFactor.toFixed(4),
+      targetWidth,
+      targetHeight,
+      targetPixels: targetWidth * targetHeight,
+    })
+  }
+
+  // Step 2: Convert to PNG and resize
+  let pngBuffer = await sharp(inputBuffer)
+    .resize(targetWidth, targetHeight, { fit: "inside", withoutEnlargement: true })
+    .png({ compressionLevel: 6 })
+    .toBuffer()
+
+  // Step 3: Ensure PNG is under 4MB for OpenAI fallback (max 3 attempts)
+  let attempts = 0
+  const maxAttempts = 3
+  const scaleFactor = 0.85
+
+  while (pngBuffer.length >= OPENAI_MAX_FILE_SIZE && attempts < maxAttempts) {
+    attempts++
+    targetWidth = Math.floor(targetWidth * scaleFactor)
+    targetHeight = Math.floor(targetHeight * scaleFactor)
+    
+    // Ensure dimensions are even
+    targetWidth = targetWidth - (targetWidth % 2)
+    targetHeight = targetHeight - (targetHeight % 2)
+
+    console.log(`[${requestId}] PNG too large for OpenAI, reducing (attempt ${attempts})`, {
+      currentSize: pngBuffer.length,
+      maxSize: OPENAI_MAX_FILE_SIZE,
+      newWidth: targetWidth,
+      newHeight: targetHeight,
+    })
+
+    pngBuffer = await sharp(inputBuffer)
+      .resize(targetWidth, targetHeight, { fit: "inside", withoutEnlargement: true })
+      .png({ compressionLevel: 9 }) // Max compression on retry
+      .toBuffer()
+  }
+
+  // Get final dimensions from the actual buffer
+  const finalMetadata = await sharp(pngBuffer).metadata()
+  const finalWidth = finalMetadata.width || targetWidth
+  const finalHeight = finalMetadata.height || targetHeight
+
+  console.log(`[${requestId}] Image normalization complete`, {
+    originalFormat,
+    originalSize: inputBuffer.length,
+    finalSize: pngBuffer.length,
+    originalDimensions: `${originalWidth}x${originalHeight}`,
+    finalDimensions: `${finalWidth}x${finalHeight}`,
+    pixelReduction: originalPixels > finalWidth * finalHeight 
+      ? `${((1 - (finalWidth * finalHeight) / originalPixels) * 100).toFixed(1)}%` 
+      : "none",
+    sizeReduction: `${((1 - pngBuffer.length / inputBuffer.length) * 100).toFixed(1)}%`,
+    meetsStabilityLimit: finalWidth * finalHeight <= STABILITY_MAX_PIXELS,
+    meetsOpenAILimit: pngBuffer.length < OPENAI_MAX_FILE_SIZE,
+  })
+
+  return {
+    buffer: pngBuffer,
+    width: finalWidth,
+    height: finalHeight,
+  }
+}
+
 /**
  * Uploads a generated PNG image to Vercel Blob and returns the public URL.
  * Handles both remote URLs (fetches and uploads) and base64 data (decodes and uploads).
@@ -1075,6 +1185,30 @@ export async function POST(request: Request) {
           success: false,
           errorMessage: `Failed to load image: ${error.message || "Unknown error"}`,
           errorCode: "IMAGE_LOAD_FAILED",
+          retryable: false,
+          requestId,
+        },
+        { status: 200 }
+      )
+    }
+
+    // Normalize input image (convert to PNG, resize for provider limits)
+    let normalizedWidth: number
+    let normalizedHeight: number
+    try {
+      const normalized = await normalizeInputImage(imageBuffer, requestId)
+      imageBuffer = normalized.buffer
+      normalizedWidth = normalized.width
+      normalizedHeight = normalized.height
+      // Update hash after normalization
+      inputHash = createHash("sha256").update(imageBuffer).digest("hex")
+    } catch (error: any) {
+      console.error(`[${requestId}] Failed to normalize image:`, error)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: `Failed to process image: ${error.message || "Unknown error"}`,
+          errorCode: "IMAGE_NORMALIZATION_FAILED",
           retryable: false,
           requestId,
         },
