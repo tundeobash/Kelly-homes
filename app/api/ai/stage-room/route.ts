@@ -287,8 +287,10 @@ async function generateStagedImage(params: {
   
   const userPromptNote = prompt ? ` ${prompt}.` : ""
   
-  // Strengthened prompt: explicitly add furniture in the transparent mask region, preserve architecture
-  const stagingPrompt = `Add new furniture and decor in the transparent region of the mask. Stage this room photo in ${style} style.${furnitureNote}${userPromptNote} The furniture must be clearly visible, well-placed, and match the ${style} aesthetic. Keep the rest of the room unchanged - do not modify walls, windows, room layout, or architecture outside the transparent region. Do not return the original image unchanged. Photorealistic. No text, no watermark.`
+  // Strengthened prompt: explicitly add furniture, preserve architecture layout with continuity
+  const stagingPrompt = `Add new furniture and decor in the editable region. Stage this room photo in ${style} style.${furnitureNote}${userPromptNote} The furniture must be clearly visible, well-placed, and match the ${style} aesthetic. Do not return the original image unchanged. Photorealistic. No text, no watermark.
+
+${CONTINUITY_CONSTRAINTS}`
 
   // Try OpenAI first if available
   if (hasOpenAI) {
@@ -361,6 +363,14 @@ async function generateStagedImage(params: {
   throw new Error("All AI providers failed. Check API keys and network connectivity.")
 }
 
+// Mask generation constants
+const MASK_MARGIN_LEFT_RIGHT = 0.07 // 7% margin on left and right
+const MASK_MARGIN_TOP = 0.42 // 42% margin on top (protect ceiling/upper walls)
+const MASK_MARGIN_BOTTOM = 0.08 // 8% margin on bottom
+const MASK_FEATHER_RADIUS = 18 // Gaussian blur radius for edge feathering (pixels)
+const MASK_TARGET_COVERAGE_MIN = 0.25 // Target 25-40% coverage
+const MASK_TARGET_COVERAGE_MAX = 0.40
+
 /**
  * Creates an inpainting mask PNG for AI inpainting APIs.
  * The mask must be the exact same dimensions as the input image.
@@ -370,9 +380,10 @@ async function generateStagedImage(params: {
  * - OpenAI: TRANSPARENT pixels (alpha=0) = editable, OPAQUE (alpha=255) = preserved
  * - Stability: May require WHITE pixels = editable, BLACK = preserved (inverted)
  * 
- * Mask strategy:
- * - Opaque black background everywhere (preserved)
- * - Transparent/white rectangle in bottom 65% + center 80% width (editable region for furniture)
+ * Mask strategy (improved for better blending):
+ * - Conservative editable region with margins to avoid architecture edges
+ * - Feathered edges to blend transition between preserved and edited regions
+ * - Target coverage: 25-40% (reduced from ~50%+)
  */
 async function createInpaintingMask(
   imageBuffer: Buffer, 
@@ -390,14 +401,32 @@ async function createInpaintingMask(
       height,
     })
     
-    // Define editable region (where furniture will be placed):
-    // - Bottom 65% of image (floor area)
-    // - Center 80% width (avoid edges)
-    const topPreserveHeight = Math.floor(height * 0.35) // Top 35% preserved (ceiling/upper walls)
-    const editableStartY = topPreserveHeight
-    const editableHeight = height - editableStartY // Bottom 65%
-    const centerWidth = Math.floor(width * 0.80) // Center 80% width
-    const centerStartX = Math.floor((width - centerWidth) / 2) // Center horizontally
+    // Define editable region with safe margins to avoid architecture edges:
+    // - Protect top 42% (ceiling, lights, upper walls)
+    // - Protect bottom 8% (floor edge, baseboard)
+    // - Protect left/right 7% each (wall edges, corners)
+    const marginLeft = Math.floor(width * MASK_MARGIN_LEFT_RIGHT)
+    const marginRight = Math.floor(width * MASK_MARGIN_LEFT_RIGHT)
+    const marginTop = Math.floor(height * MASK_MARGIN_TOP)
+    const marginBottom = Math.floor(height * MASK_MARGIN_BOTTOM)
+    
+    const editableStartX = marginLeft
+    const editableEndX = width - marginRight
+    const editableStartY = marginTop
+    const editableEndY = height - marginBottom
+    
+    const editableWidth = editableEndX - editableStartX
+    const editableHeight = editableEndY - editableStartY
+    
+    // Verify coverage is within target range
+    const coverage = (editableWidth * editableHeight) / (width * height)
+    console.log(`[${requestId}] Mask coverage calculation`, {
+      editableWidth,
+      editableHeight,
+      coverage: `${(coverage * 100).toFixed(1)}%`,
+      targetRange: `${MASK_TARGET_COVERAGE_MIN * 100}%-${MASK_TARGET_COVERAGE_MAX * 100}%`,
+      withinTarget: coverage >= MASK_TARGET_COVERAGE_MIN && coverage <= MASK_TARGET_COVERAGE_MAX,
+    })
     
     // Create raw RGBA buffer: 4 bytes per pixel (R, G, B, A)
     const pixelCount = width * height
@@ -420,8 +449,8 @@ async function createInpaintingMask(
       }
       
       // Set editable region to TRANSPARENT (alpha=0, RGB=0)
-      for (let y = editableStartY; y < height; y++) {
-        for (let x = centerStartX; x < centerStartX + centerWidth; x++) {
+      for (let y = editableStartY; y < editableEndY; y++) {
+        for (let x = editableStartX; x < editableEndX; x++) {
           const offset = (y * width + x) * 4
           rawBuffer[offset] = 0     // R
           rawBuffer[offset + 1] = 0 // G
@@ -440,8 +469,8 @@ async function createInpaintingMask(
       }
       
       // Set editable region to OPAQUE WHITE (RGB=255, alpha=255)
-      for (let y = editableStartY; y < height; y++) {
-        for (let x = centerStartX; x < centerStartX + centerWidth; x++) {
+      for (let y = editableStartY; y < editableEndY; y++) {
+        for (let x = editableStartX; x < editableEndX; x++) {
           const offset = (y * width + x) * 4
           rawBuffer[offset] = 255     // R = white (editable)
           rawBuffer[offset + 1] = 255 // G = white
@@ -451,9 +480,8 @@ async function createInpaintingMask(
       }
     }
     
-    // Create PNG from raw RGBA buffer using sharp
-    // Do NOT call blur/flatten/removeAlpha/ensureAlpha - preserve alpha as-is
-    const maskBuffer = await sharp(rawBuffer, {
+    // Create initial PNG from raw RGBA buffer
+    let maskBuffer = await sharp(rawBuffer, {
       raw: {
         width,
         height,
@@ -463,14 +491,69 @@ async function createInpaintingMask(
       .png()
       .toBuffer()
     
-    const editablePercentage = Math.round((centerWidth * editableHeight) / (width * height) * 100)
+    // Apply edge feathering using Gaussian blur on a separate channel
+    // For Stability (inverted): blur the RGB channels to feather the white/black transition
+    // For OpenAI: blur the alpha channel to feather the transparent/opaque transition
+    if (MASK_FEATHER_RADIUS > 0) {
+      if (isInverted) {
+        // For Stability: blur the entire image to feather white/black edges
+        // This creates a gradient at the boundary
+        maskBuffer = await sharp(maskBuffer)
+          .blur(MASK_FEATHER_RADIUS)
+          .png()
+          .toBuffer()
+      } else {
+        // For OpenAI: we need to feather the alpha channel
+        // Extract alpha, blur it, recombine
+        // Since sharp doesn't directly support alpha-only blur, we use a workaround:
+        // 1. Extract alpha as grayscale
+        // 2. Blur it
+        // 3. Use blurred grayscale as new alpha
+        const alphaChannel = await sharp(rawBuffer, {
+          raw: { width, height, channels: 4 },
+        })
+          .extractChannel(3) // Alpha channel
+          .toBuffer()
+        
+        const blurredAlpha = await sharp(alphaChannel, {
+          raw: { width, height, channels: 1 },
+        })
+          .blur(MASK_FEATHER_RADIUS)
+          .raw()
+          .toBuffer()
+        
+        // Recombine: create new RGBA buffer with blurred alpha
+        const featheredBuffer = Buffer.alloc(bufferSize)
+        for (let i = 0; i < pixelCount; i++) {
+          const rgbaOffset = i * 4
+          featheredBuffer[rgbaOffset] = 0     // R (black)
+          featheredBuffer[rgbaOffset + 1] = 0 // G
+          featheredBuffer[rgbaOffset + 2] = 0 // B
+          featheredBuffer[rgbaOffset + 3] = blurredAlpha[i] // Feathered alpha
+        }
+        
+        maskBuffer = await sharp(featheredBuffer, {
+          raw: { width, height, channels: 4 },
+        })
+          .png()
+          .toBuffer()
+      }
+      
+      console.log(`[${requestId}] Applied edge feathering`, {
+        featherRadius: MASK_FEATHER_RADIUS,
+        mode: isInverted ? "RGB blur" : "alpha blur",
+      })
+    }
+    
+    const editablePercentage = Math.round(coverage * 100)
     
     // Compute mask stats for logging
-    const maskMetadata = await sharp(maskBuffer).raw().toBuffer({ resolveWithObject: true })
-    const maskPixels = maskMetadata.data
+    const maskMetadataResult = await sharp(maskBuffer).raw().toBuffer({ resolveWithObject: true })
+    const maskPixels = maskMetadataResult.data
     let transparentCount = 0
     let whiteCount = 0
     let blackCount = 0
+    let partialCount = 0 // Feathered pixels
     
     for (let i = 0; i < maskPixels.length; i += 4) {
       const r = maskPixels[i]
@@ -480,10 +563,14 @@ async function createInpaintingMask(
       
       if (a === 0) {
         transparentCount++
-      } else if (r === 255 && g === 255 && b === 255) {
-        whiteCount++ // White = editable (inverted mode)
-      } else if (r === 0 && g === 0 && b === 0) {
-        blackCount++ // Black = preserved
+      } else if (a < 255 && !isInverted) {
+        partialCount++ // Feathered alpha
+      } else if (r === 255 && g === 255 && b === 255 && a === 255) {
+        whiteCount++
+      } else if (r === 0 && g === 0 && b === 0 && a === 255) {
+        blackCount++
+      } else if (isInverted && r > 0 && r < 255) {
+        partialCount++ // Feathered grayscale
       }
     }
     
@@ -494,20 +581,29 @@ async function createInpaintingMask(
       width,
       height,
       editableRegion: {
-        x: centerStartX,
+        x: editableStartX,
         y: editableStartY,
-        width: centerWidth,
+        width: editableWidth,
         height: editableHeight,
         coverage: `${editablePercentage}%`,
       },
+      margins: {
+        left: `${(MASK_MARGIN_LEFT_RIGHT * 100).toFixed(0)}%`,
+        right: `${(MASK_MARGIN_LEFT_RIGHT * 100).toFixed(0)}%`,
+        top: `${(MASK_MARGIN_TOP * 100).toFixed(0)}%`,
+        bottom: `${(MASK_MARGIN_BOTTOM * 100).toFixed(0)}%`,
+      },
+      featherRadius: MASK_FEATHER_RADIUS,
       maskSize: maskBuffer.length,
       maskMode,
       inverted: isInverted,
       maskStats: {
         editablePixels: isInverted ? whiteCount : transparentCount,
         preservedPixels: blackCount,
+        featheredPixels: partialCount,
         editablePercent: ((isInverted ? whiteCount : transparentCount) / totalPixels * 100).toFixed(2) + "%",
         preservedPercent: (blackCount / totalPixels * 100).toFixed(2) + "%",
+        featheredPercent: (partialCount / totalPixels * 100).toFixed(2) + "%",
       },
     })
     
@@ -551,6 +647,13 @@ async function createInpaintingMask(
     throw new Error(`Failed to create inpainting mask: ${error.message}`)
   }
 }
+
+// Continuity constraints to append to rendering prompts
+const CONTINUITY_CONSTRAINTS = `
+Preserve architectural layout and room structure. Do not change camera angle.
+Allow subtle lighting and surface adjustments to maintain seamless continuity.
+No visible seams or cut lines. Consistent wall shading and continuous surfaces.
+Consistent lighting direction and color temperature. Preserve global perspective and vanishing points.`.trim()
 
 /**
  * Generate staged image using OpenAI Images Edits API (inpainting)
@@ -1251,10 +1354,12 @@ export async function POST(request: Request) {
               })
             }
 
-            // Build final prompt with plan, incorporating style prompts
+            // Build final prompt with plan, incorporating style prompts and continuity constraints
             const planJsonText = JSON.stringify(plan.planJson, null, 2)
-            const stabilityPositive = finalPositive || `Edit this exact room photo. Add furniture per plan. Keep perspective and walls/floor. Must visibly change room.`
+            const stabilityPositive = finalPositive || `Edit this exact room photo. Add furniture per plan. Must visibly change room.`
             const stabilityPrompt = `${stabilityPositive}
+
+${CONTINUITY_CONSTRAINTS}
 
 Staging Plan:
 ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
@@ -1287,10 +1392,8 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
             
             console.log(`[${requestId}] Using Stability renderer (no planner)`)
             // Use resolved style prompt, or fallback to simple prompt if style not found
-            const stabilityPositive = finalPositive || `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Keep perspective and walls/floor. Must visibly change room.`
-            const simplePrompt = finalNegative 
-              ? `${stabilityPositive}\n\nNegative prompts:\n${finalNegative}`
-              : stabilityPositive
+            const stabilityPositive = finalPositive || `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Must visibly change room.`
+            const simplePrompt = `${stabilityPositive}\n\n${CONTINUITY_CONSTRAINTS}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
             
             // Check if mask inversion is enabled for Stability
             const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false" // Default to true
@@ -1315,8 +1418,9 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
           console.warn(`[${requestId}] Stability AI failed, falling back to OpenAI:`, stabilityError.message)
           // Fallback to OpenAI (use normalized buffer)
           if (hasOpenAI) {
-            // Use resolved style prompts for OpenAI
-            const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
+            // Use resolved style prompts for OpenAI with continuity constraints
+            const basePrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
+            const openaiPrompt = `${basePrompt}\n\n${CONTINUITY_CONSTRAINTS}`
             const result = await generateWithOpenAI(imageBuffer, openaiPrompt, requestId, finalNegative)
             // OpenAI returns a URL, fetch and convert to buffer
             const openaiResponse = await fetch(result)
@@ -1331,8 +1435,9 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
         }
       } else if (selectedProvider === "openai") {
         // Use existing OpenAI pipeline (use normalized buffer)
-        // Use resolved style prompts for OpenAI
-        const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
+        // Use resolved style prompts for OpenAI with continuity constraints
+        const basePrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
+        const openaiPrompt = `${basePrompt}\n\n${CONTINUITY_CONSTRAINTS}`
         const result = await generateWithOpenAI(imageBuffer, openaiPrompt, requestId, finalNegative)
         // OpenAI returns a URL, fetch and convert to buffer
         const openaiResponse = await fetch(result)
