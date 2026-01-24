@@ -3,7 +3,7 @@ import { getUserContext } from "@/lib/auth/getUserContext"
 import { prisma } from "@/lib/prisma"
 import { randomBytes } from "crypto"
 import { writeFile, mkdir, stat, unlink } from "fs/promises"
-import { copyFileSync, readdirSync, statSync, readFileSync } from "fs"
+import { readFileSync } from "fs"
 import { join } from "path"
 import { existsSync } from "fs"
 import { createHash } from "crypto"
@@ -11,6 +11,7 @@ import sharp from "sharp"
 import { planRoomDesign, createFallbackPlan, PlannerResult } from "@/lib/ai/geminiPlanner"
 import { renderWithStability } from "@/lib/ai/stabilityRenderer"
 import { stylePrompts } from "@/lib/stylePrompts"
+import { put } from "@vercel/blob"
 
 // Ensure Node.js runtime for Gemini calls
 export const runtime = "nodejs"
@@ -43,27 +44,24 @@ async function retryWithBackoff<T>(
 }
 
 /**
- * Saves a generated PNG image to disk and returns the public URL.
- * Handles both remote URLs (fetches and saves) and base64 data (decodes and saves).
+ * Uploads a generated PNG image to Vercel Blob and returns the public URL.
+ * Handles both remote URLs (fetches and uploads) and base64 data (decodes and uploads).
  */
-async function saveGeneratedPng(params: {
-  data: string // Can be a remote URL (https://...) or base64 data
+async function uploadGeneratedImageToBlob(params: {
+  data: string | Buffer // Can be a remote URL (https://...), base64 data, or Buffer
   filename: string
   requestId: string
 }): Promise<string> {
   const { data, filename, requestId } = params
   
-  // Ensure uploads directory exists
-  const uploadsDir = join(process.cwd(), "public", "uploads")
-  if (!existsSync(uploadsDir)) {
-    await mkdir(uploadsDir, { recursive: true })
-  }
-
-  const fullPath = join(uploadsDir, filename)
   let buffer: Buffer
 
+  // Handle Buffer directly
+  if (Buffer.isBuffer(data)) {
+    buffer = data
+  }
   // Handle remote URL
-  if (data.startsWith("http://") || data.startsWith("https://")) {
+  else if (typeof data === "string" && (data.startsWith("http://") || data.startsWith("https://"))) {
     try {
       console.log(`[${requestId}] Fetching image from remote URL: ${data.substring(0, 50)}...`)
       const response = await fetch(data)
@@ -78,7 +76,7 @@ async function saveGeneratedPng(params: {
     }
   } 
   // Handle base64 data
-  else if (data.startsWith("data:image/") || /^[A-Za-z0-9+/=]+$/.test(data)) {
+  else if (typeof data === "string" && (data.startsWith("data:image/") || /^[A-Za-z0-9+/=]+$/.test(data))) {
     try {
       // Remove data URL prefix if present (e.g., "data:image/png;base64,")
       const base64Data = data.includes(",") ? data.split(",")[1] : data
@@ -88,41 +86,26 @@ async function saveGeneratedPng(params: {
       throw new Error(`Failed to decode base64 image: ${error.message}`)
     }
   } else {
-    throw new Error(`Invalid image data format. Expected URL or base64, got: ${data.substring(0, 50)}`)
+    throw new Error(`Invalid image data format. Expected URL, base64, or Buffer`)
   }
 
-  // Write file to disk
+  // Upload to Vercel Blob
   try {
-    await writeFile(fullPath, buffer)
-    const byteSize = buffer.length
-    
-    // CRITICAL: Verify file exists after writing
-    try {
-      const stats = await stat(fullPath)
-      if (!stats.isFile()) {
-        throw new Error(`File exists but is not a regular file: ${fullPath}`)
-      }
-      if (stats.size !== byteSize) {
-        throw new Error(`File size mismatch: expected ${byteSize}, got ${stats.size}`)
-      }
-    } catch (statError: any) {
-      console.error(`[${requestId}] File verification failed:`, statError)
-      throw new Error(`File was not written correctly: ${statError.message}`)
-    }
-    
-    const publicUrl = `/uploads/${filename}`
-    
-    console.log(`[${requestId}] Saved generated image`, {
-      fullPath,
-      byteSize,
-      publicUrl,
-      verified: true,
+    const blob = await put(`generated/${filename}`, buffer, {
+      access: "public",
+      contentType: "image/png",
     })
     
-    return publicUrl
+    console.log(`[${requestId}] Uploaded generated image to Vercel Blob`, {
+      filename,
+      byteSize: buffer.length,
+      blobUrl: blob.url,
+    })
+    
+    return blob.url
   } catch (error: any) {
-    console.error(`[${requestId}] Error writing file:`, error)
-    throw new Error(`Failed to save image file: ${error.message}`)
+    console.error(`[${requestId}] Error uploading to Vercel Blob:`, error)
+    throw new Error(`Failed to upload image to Blob: ${error.message}`)
   }
 }
 
@@ -396,20 +379,16 @@ async function createInpaintingMask(
       },
     })
     
-    // Save debug artifacts in dev mode
-    if (process.env.NODE_ENV === "development" || process.env.SAVE_DEBUG_ARTIFACTS === "true") {
+    // Save debug artifacts in dev mode only (skip on Vercel to avoid ENOENT)
+    if (process.env.NODE_ENV === "development" && process.env.SAVE_DEBUG_ARTIFACTS === "true") {
       try {
-        const uploadsDir = join(process.cwd(), "public", "uploads")
-        if (!existsSync(uploadsDir)) {
-          await mkdir(uploadsDir, { recursive: true })
-        }
+        const tmpDir = "/tmp"
         
         // Save mask
-        const maskDebugPath = join(uploadsDir, `debug-mask-${requestId}.png`)
+        const maskDebugPath = join(tmpDir, `debug-mask-${requestId}.png`)
         await writeFile(maskDebugPath, maskBuffer)
         
         // Save composite preview (input image with mask overlay)
-        // First apply mask with transparency, then overlay on original
         const maskOverlay = await sharp(maskBuffer)
           .resize(width, height)
           .toBuffer()
@@ -422,10 +401,10 @@ async function createInpaintingMask(
           .png()
           .toBuffer()
         
-        const compositePath = join(uploadsDir, `debug-composite-${requestId}.png`)
+        const compositePath = join(tmpDir, `debug-composite-${requestId}.png`)
         await writeFile(compositePath, compositeBuffer)
         
-        console.log(`[${requestId}] Debug artifacts saved`, {
+        console.log(`[${requestId}] Debug artifacts saved to /tmp`, {
           mask: maskDebugPath,
           composite: compositePath,
         })
@@ -461,8 +440,13 @@ async function generateWithOpenAI(
 
   // Resolve image path to absolute file path
   let imagePath: string
+  let imageBuffer: Buffer
   if (imageUrl.startsWith("/uploads/") || imageUrl.startsWith("/images/")) {
     imagePath = join(process.cwd(), "public", imageUrl)
+    if (!existsSync(imagePath)) {
+      throw new Error(`Image file not found: ${imagePath}`)
+    }
+    imageBuffer = readFileSync(imagePath)
   } else if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
     // Fetch remote image
     const response = await fetch(imageUrl)
@@ -470,22 +454,17 @@ async function generateWithOpenAI(
       throw new Error(`Failed to fetch image: HTTP ${response.status}`)
     }
     const arrayBuffer = await response.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
+    imageBuffer = Buffer.from(arrayBuffer)
     
-    // Save temporarily to use with OpenAI
-    const tempPath = join(process.cwd(), "public", "uploads", `temp_${Date.now()}.png`)
-    await writeFile(tempPath, buffer)
+    // Save temporarily to /tmp (writable on Vercel)
+    const tempPath = join("/tmp", `temp_${Date.now()}.png`)
+    await writeFile(tempPath, imageBuffer)
     imagePath = tempPath
   } else {
     throw new Error(`Invalid image URL format: ${imageUrl}`)
   }
 
-  if (!existsSync(imagePath)) {
-    throw new Error(`Image file not found: ${imagePath}`)
-  }
-
-  // Read image file
-  const imageBuffer = readFileSync(imagePath)
+  // imageBuffer is already loaded above
   
   // Compute SHA256 hash of input image for no-op detection
   const inputHash = createHash("sha256").update(imageBuffer).digest("hex")
@@ -510,12 +489,8 @@ async function generateWithOpenAI(
   // For OpenAI Images Edits API (inpainting), we need a transparency-based mask:
   // - TRANSPARENT pixels (alpha=0) = editable region (where furniture will be added)
   // - OPAQUE pixels (alpha=255) = preserved region (walls, ceiling, windows)
-  const uploadsDir = join(process.cwd(), "public", "uploads")
-  if (!existsSync(uploadsDir)) {
-    await mkdir(uploadsDir, { recursive: true })
-  }
-  
-  const maskPath = join(uploadsDir, `mask_${Date.now()}.png`)
+  // Use /tmp for mask file (writable on Vercel)
+  const maskPath = join("/tmp", `mask_${Date.now()}.png`)
   
   // Create an inpainting mask PNG with transparent editable region
   // The mask must be in RGBA format with same dimensions as the image
@@ -1253,7 +1228,7 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
     const sanitizedStyle = style.replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase()
     const filename = `design-${Date.now()}-${sanitizedStyle}.png`
 
-    // Save image to disk (handles both remote URLs and base64)
+    // Upload image to Vercel Blob
     let generatedImageUrl: string
     let fallbackUsed = false
     try {
@@ -1274,115 +1249,63 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
           throw new Error("Output is not a valid PNG or JPEG")
         }
 
-        // Save to disk
-        const uploadsDir = join(process.cwd(), "public", "uploads")
-        if (!existsSync(uploadsDir)) {
-          await mkdir(uploadsDir, { recursive: true })
-        }
-        const fullPath = join(uploadsDir, filename)
-        await writeFile(fullPath, generatedImageBuffer)
+        // Upload to Vercel Blob
+        generatedImageUrl = await uploadGeneratedImageToBlob({
+          data: generatedImageBuffer,
+          filename,
+          requestId,
+        })
 
-        // Verify file was saved
-        const savedStats = await stat(fullPath)
-        if (!savedStats.isFile() || savedStats.size < 200 * 1024) {
-          throw new Error(`File verification failed: ${fullPath}`)
-        }
-
-        generatedImageUrl = `/uploads/${filename}`
-
-        console.log(`[${requestId}] Saved Stability AI output`, {
+        console.log(`[${requestId}] Uploaded Stability AI output to Blob`, {
           provider: actualProviderUsed,
           planner: actualPlannerUsed,
-          fileSize: savedStats.size,
+          fileSize: generatedImageBuffer.length,
           outputHash: createHash("sha256").update(generatedImageBuffer).digest("hex").substring(0, 16) + "...",
           inputHash: inputHash.substring(0, 16) + "...",
+          blobUrl: generatedImageUrl,
         })
       } else if (actualProviderUsed === "openai") {
-        // Handle OpenAI URL output (existing flow)
-        // Use resolved style prompts for OpenAI
+        // Handle OpenAI URL output - fetch and upload to Blob
         const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
         const result = await generateWithOpenAI(imageUrl, openaiPrompt, requestId, finalNegative)
-        generatedImageUrl = await saveGeneratedPng({
+        generatedImageUrl = await uploadGeneratedImageToBlob({
           data: result,
           filename,
           requestId,
         })
       } else if (actualProviderUsed === "mock") {
-        // Handle mock mode: copy a real placeholder PNG
+        // Handle mock mode: use a placeholder image
         fallbackUsed = true
-        // Find a valid placeholder source (prefer dedicated placeholder, then existing design, then fallback)
-        let placeholderSrc: string | null = null
+        
+        // Find a valid placeholder source
+        let placeholderBuffer: Buffer | null = null
         
         // 1. Try dedicated placeholder directory
         const dedicatedPlaceholder = join(process.cwd(), "public", "placeholders", "design-placeholder.png")
         if (existsSync(dedicatedPlaceholder)) {
-          placeholderSrc = dedicatedPlaceholder
+          placeholderBuffer = readFileSync(dedicatedPlaceholder)
         } else {
-          // 2. Try to find an existing design-*.png in uploads (over 1MB)
-          try {
-            const uploadsDir = join(process.cwd(), "public", "uploads")
-            if (existsSync(uploadsDir)) {
-              const files = readdirSync(uploadsDir)
-              const designFiles = files
-                .filter((f) => f.startsWith("design-") && f.endsWith(".png"))
-                .map((f) => {
-                  const filePath = join(uploadsDir, f)
-                  try {
-                    const stats = statSync(filePath)
-                    return { file: f, path: filePath, size: stats.size }
-                  } catch {
-                    return null
-                  }
-                })
-                .filter((f): f is { file: string; path: string; size: number } => f !== null && f.size > 1024 * 1024) // > 1MB
-                .sort((a, b) => b.size - a.size) // Sort by size descending
-              
-              if (designFiles.length > 0) {
-                placeholderSrc = designFiles[0].path
-              }
-            }
-          } catch (error) {
-            // Silently continue to fallback
-          }
-          
-          // 3. Fallback to existing asset
-          if (!placeholderSrc) {
-            placeholderSrc = join(process.cwd(), "public", "images", "skus", "sofas", "sofa_01.png")
+          // 2. Fallback to existing asset
+          const fallbackPath = join(process.cwd(), "public", "images", "skus", "sofas", "sofa_01.png")
+          if (existsSync(fallbackPath)) {
+            placeholderBuffer = readFileSync(fallbackPath)
           }
         }
         
-        // Ensure source exists
-        if (!placeholderSrc || !existsSync(placeholderSrc)) {
-          throw new Error(`Placeholder source not found: ${placeholderSrc}`)
+        if (!placeholderBuffer) {
+          throw new Error("No placeholder image found for mock mode")
         }
         
-        // Ensure uploads directory exists
-        const uploadsDir = join(process.cwd(), "public", "uploads")
-        if (!existsSync(uploadsDir)) {
-          await mkdir(uploadsDir, { recursive: true })
-        }
+        // Upload placeholder to Vercel Blob
+        generatedImageUrl = await uploadGeneratedImageToBlob({
+          data: placeholderBuffer,
+          filename,
+          requestId,
+        })
         
-        const fullPath = join(uploadsDir, filename)
-        
-        // Copy the placeholder PNG synchronously
-        copyFileSync(placeholderSrc, fullPath)
-        
-        // CRITICAL: Verify file exists and has valid size after copying
-        const finalStats = await stat(fullPath)
-        if (!finalStats.isFile()) {
-          throw new Error(`File exists but is not a regular file: ${fullPath}`)
-        }
-        if (finalStats.size < 1024) {
-          throw new Error(`File size too small: expected > 1KB, got ${finalStats.size} bytes`)
-        }
-        
-        generatedImageUrl = `/uploads/${filename}`
-        
-        console.log(`[${requestId}] Copied placeholder PNG`, {
-          src: placeholderSrc,
-          dest: fullPath,
-          bytes: finalStats.size,
-          publicUrl: generatedImageUrl,
+        console.log(`[${requestId}] Uploaded placeholder to Blob`, {
+          bytes: placeholderBuffer.length,
+          blobUrl: generatedImageUrl,
           fallbackUsed: true,
         })
       } else {
@@ -1390,35 +1313,12 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
         throw new Error("No image data to save")
       }
     } catch (error: any) {
-      console.error(`[${requestId}] Failed to save generated image:`, error)
+      console.error(`[${requestId}] Failed to upload generated image:`, error)
       return NextResponse.json(
         {
           success: false,
-          errorMessage: `Failed to save generated image: ${error.message || "Unknown error"}`,
-          errorCode: "SAVE_IMAGE_FAILED",
-          retryable: false,
-          requestId,
-        },
-        { status: 500 }
-      )
-    }
-
-    // CRITICAL: Only proceed if file was verified to exist
-    // Double-check file exists before updating DB or logging success
-    const uploadsDir = join(process.cwd(), "public", "uploads")
-    const fullPath = join(uploadsDir, filename)
-    try {
-      const finalStats = await stat(fullPath)
-      if (!finalStats.isFile()) {
-        throw new Error(`File verification failed: ${fullPath} is not a file`)
-      }
-    } catch (verifyError: any) {
-      console.error(`[${requestId}] Final file verification failed:`, verifyError)
-      return NextResponse.json(
-        {
-          success: false,
-          errorMessage: `Generated file was not found: ${verifyError.message}`,
-          errorCode: "FILE_VERIFICATION_FAILED",
+          errorMessage: `Failed to upload generated image: ${error.message || "Unknown error"}`,
+          errorCode: "UPLOAD_IMAGE_FAILED",
           retryable: false,
           requestId,
         },
@@ -1470,16 +1370,12 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
       }
     }
 
-    // ONLY log success after file is confirmed to exist
-    const finalStats = await stat(join(process.cwd(), "public", "uploads", filename))
+    // Log success
     console.log(`[${requestId}] Generation successful`, {
       provider: actualProviderUsed,
       fallbackUsed,
       imageUrl: generatedImageUrl,
       designId: savedDesignId,
-      fullPath: join(process.cwd(), "public", "uploads", filename),
-      fileSize: finalStats.size,
-      fileVerified: true,
     })
 
     return NextResponse.json({
