@@ -1,7 +1,12 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Stage, Layer, Image, Group } from "@/components/KonvaCanvasClient"
+import { ENABLE_KONVA } from "@/lib/featureFlags"
+
+// Only import Konva components when enabled
+const { Stage, Layer, Image, Group } = ENABLE_KONVA
+  ? require("@/components/KonvaCanvasClient")
+  : { Stage: null, Layer: null, Image: null, Group: null }
 
 // TODO: Replace with AR SDK (e.g., AR.js, 8th Wall, or WebXR)
 // This is a 2.5D canvas-based preview - can be upgraded to full AR
@@ -90,6 +95,17 @@ export default function RoomPreview({ roomImage, items }: RoomPreviewProps) {
     return (
       <div className="w-full aspect-video bg-gray-100 rounded flex items-center justify-center">
         <p className="text-muted-foreground">Loading preview...</p>
+      </div>
+    )
+  }
+
+  // Show placeholder when Konva is disabled for diagnostics
+  if (!ENABLE_KONVA) {
+    return (
+      <div className="w-full aspect-video bg-gray-100 rounded flex items-center justify-center border-2 border-dashed border-gray-300">
+        <p className="text-muted-foreground text-center px-4">
+          Room preview temporarily disabled for diagnostics
+        </p>
       </div>
     )
   }

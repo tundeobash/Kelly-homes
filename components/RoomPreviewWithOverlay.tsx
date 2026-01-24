@@ -6,7 +6,12 @@ import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
 import { catalog, CatalogItem } from "@/lib/catalog"
 import { X, ArrowUp, ArrowDown, Trash2 } from "lucide-react"
-import { Stage, Layer, Image as KonvaImage, Group, Rect } from "@/components/KonvaCanvasClient"
+import { ENABLE_KONVA } from "@/lib/featureFlags"
+
+// Only import Konva components when enabled
+const { Stage, Layer, Image: KonvaImage, Group, Rect } = ENABLE_KONVA
+  ? require("@/components/KonvaCanvasClient")
+  : { Stage: null, Layer: null, Image: null, Group: null, Rect: null }
 
 export type PlacedItem = {
   id: string
@@ -317,6 +322,17 @@ export default function RoomPreviewWithOverlay({
     return (
       <div className="w-full aspect-video bg-gray-100 rounded flex items-center justify-center">
         <p className="text-muted-foreground">Loading preview...</p>
+      </div>
+    )
+  }
+
+  // Show placeholder when Konva is disabled for diagnostics
+  if (!ENABLE_KONVA) {
+    return (
+      <div className="w-full aspect-video bg-gray-100 rounded flex items-center justify-center border-2 border-dashed border-gray-300">
+        <p className="text-muted-foreground text-center px-4">
+          Room preview temporarily disabled for diagnostics
+        </p>
       </div>
     )
   }
