@@ -1,7 +1,9 @@
 import { randomBytes } from "crypto"
+import sharp from "sharp"
 
 /**
  * Render image using Stability AI image-to-image API
+ * Supports both inpainting (with mask) and image-to-image (without mask) modes
  */
 export async function renderWithStability(params: {
   imageBuffer: Buffer
@@ -9,23 +11,34 @@ export async function renderWithStability(params: {
   strength?: number
   maskBuffer?: Buffer
   requestId?: string
+  mode?: "inpaint" | "image-to-image"
 }): Promise<Buffer> {
-  const { imageBuffer, prompt, strength: providedStrength, maskBuffer, requestId } = params
+  const { imageBuffer, prompt, strength: providedStrength, maskBuffer, requestId, mode: providedMode } = params
   
   // Use stronger default for more visible changes (0.8 instead of 0.7)
   // Allow override via env or use provided value
   const defaultStrength = parseFloat(process.env.STABILITY_STRENGTH || "0.8")
   const strength = providedStrength ?? defaultStrength
+  
+  // Determine mode: use provided mode, or infer from mask presence
+  const mode = providedMode ?? (maskBuffer ? "inpaint" : "image-to-image")
 
   const apiKey = process.env.STABILITY_API_KEY
   if (!apiKey) {
     throw new Error("STABILITY_API_KEY not set")
   }
 
-  // Stability AI image-to-image endpoint
-  const apiUrl = "https://api.stability.ai/v2beta/stable-image/edit/inpaint"
+  // Select endpoint based on mode
+  const apiUrl = mode === "inpaint"
+    ? "https://api.stability.ai/v2beta/stable-image/edit/inpaint"
+    : "https://api.stability.ai/v2beta/stable-image/generate/sd3"
 
   try {
+    // Get image dimensions for output sizing
+    const imageMetadata = await sharp(imageBuffer).metadata()
+    const imgWidth = imageMetadata.width || 1024
+    const imgHeight = imageMetadata.height || 1024
+    
     // Build multipart/form-data manually (Node.js compatible)
     const boundary = `----WebKitFormBoundary${randomBytes(16).toString("hex")}`
     const formDataParts: Buffer[] = []
@@ -58,8 +71,8 @@ export async function renderWithStability(params: {
       formDataParts.push(Buffer.from(`\r\n`))
     }
 
-    // Add mask if provided (for inpainting)
-    if (maskBuffer) {
+    // Add mask if provided and in inpaint mode
+    if (maskBuffer && mode === "inpaint") {
       formDataParts.push(Buffer.from(`--${boundary}\r\n`))
       formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="mask"; filename="mask.png"\r\n`))
       formDataParts.push(Buffer.from(`Content-Type: image/png\r\n\r\n`))
@@ -73,23 +86,32 @@ export async function renderWithStability(params: {
     formDataParts.push(Buffer.from("png"))
     formDataParts.push(Buffer.from(`\r\n`))
 
-    // Add mode
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="mode"\r\n\r\n`))
-    formDataParts.push(Buffer.from("inpaint"))
-    formDataParts.push(Buffer.from(`\r\n`))
+    // Add mode for inpaint endpoint
+    if (mode === "inpaint") {
+      formDataParts.push(Buffer.from(`--${boundary}\r\n`))
+      formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="mode"\r\n\r\n`))
+      formDataParts.push(Buffer.from("image-to-image"))
+      formDataParts.push(Buffer.from(`\r\n`))
+    }
 
-    // Add width
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="width"\r\n\r\n`))
-    formDataParts.push(Buffer.from("1024"))
-    formDataParts.push(Buffer.from(`\r\n`))
-
-    // Add height
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="height"\r\n\r\n`))
-    formDataParts.push(Buffer.from("1024"))
-    formDataParts.push(Buffer.from(`\r\n`))
+    // Add aspect ratio for SD3 endpoint (preserve input aspect ratio)
+    if (mode === "image-to-image") {
+      // Calculate aspect ratio string (SD3 supports specific ratios)
+      const aspectRatio = imgWidth / imgHeight
+      let aspectStr = "1:1"
+      if (aspectRatio > 1.7) aspectStr = "16:9"
+      else if (aspectRatio > 1.4) aspectStr = "3:2"
+      else if (aspectRatio > 1.2) aspectStr = "4:3"
+      else if (aspectRatio > 0.9) aspectStr = "1:1"
+      else if (aspectRatio > 0.7) aspectStr = "3:4"
+      else if (aspectRatio > 0.55) aspectStr = "2:3"
+      else aspectStr = "9:16"
+      
+      formDataParts.push(Buffer.from(`--${boundary}\r\n`))
+      formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="aspect_ratio"\r\n\r\n`))
+      formDataParts.push(Buffer.from(aspectStr))
+      formDataParts.push(Buffer.from(`\r\n`))
+    }
 
     // Close boundary
     formDataParts.push(Buffer.from(`--${boundary}--\r\n`))
@@ -102,12 +124,14 @@ export async function renderWithStability(params: {
     
     console.log(`[STABILITY] [${requestId || "unknown"}] Request debug`, {
       endpoint: apiUrl,
+      mode,
       acceptHeader,
       outputFormat,
       strength,
       guidanceScale: guidanceScale || "not set",
       hasMask: !!maskBuffer,
       maskSize: maskBuffer?.length || 0,
+      inputDimensions: `${imgWidth}x${imgHeight}`,
       boundary: boundary.substring(0, 20) + "...",
       formDataSize: formDataBuffer.length,
     })
@@ -116,8 +140,8 @@ export async function renderWithStability(params: {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        Accept: acceptHeader, // Changed from "image/png" to "image/*" to fix 400 error
-        "Content-Type": `multipart/form-data; boundary=${boundary}`, // Required when manually building FormData
+        Accept: acceptHeader,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
       },
       body: formDataBuffer,
     })
