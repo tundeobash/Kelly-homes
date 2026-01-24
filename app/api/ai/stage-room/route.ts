@@ -50,33 +50,43 @@ const OPENAI_MAX_FILE_SIZE = 4 * 1024 * 1024
 
 /**
  * Normalizes input image for AI providers:
+ * - Applies EXIF orientation correction (auto-rotate)
  * - Converts any format (JPEG, HEIC, etc.) to PNG
- * - Resizes to meet Stability's pixel limit (9,437,184 pixels max)
+ * - Resizes to meet Stability's pixel limit (9,437,184 pixels max) while preserving aspect ratio
  * - Ensures PNG is under 4MB for OpenAI fallback compatibility
  */
 async function normalizeInputImage(
   inputBuffer: Buffer,
   requestId: string
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
-  // Get original metadata
-  const metadata = await sharp(inputBuffer).metadata()
+  // Step 1: Apply EXIF rotation first to get correct orientation
+  // This ensures portrait photos stay portrait after rotation
+  const rotatedBuffer = await sharp(inputBuffer)
+    .rotate() // Auto-rotate based on EXIF orientation
+    .toBuffer()
+  
+  // Get metadata AFTER rotation (dimensions may have swapped for portrait)
+  const metadata = await sharp(rotatedBuffer).metadata()
   const originalWidth = metadata.width || 1024
   const originalHeight = metadata.height || 1024
   const originalPixels = originalWidth * originalHeight
   const originalFormat = metadata.format || "unknown"
+  const aspectRatio = originalWidth / originalHeight
 
   console.log(`[${requestId}] Normalizing input image`, {
     originalFormat,
     originalWidth,
     originalHeight,
     originalPixels,
+    aspectRatio: aspectRatio.toFixed(3),
+    orientation: originalWidth > originalHeight ? "landscape" : originalWidth < originalHeight ? "portrait" : "square",
     originalSize: inputBuffer.length,
   })
 
   let targetWidth = originalWidth
   let targetHeight = originalHeight
 
-  // Step 1: Check if resize needed for Stability pixel limit
+  // Step 2: Check if resize needed for Stability pixel limit (preserve aspect ratio)
   if (originalPixels > STABILITY_MAX_PIXELS) {
     const scaleFactor = Math.sqrt(STABILITY_MAX_PIXELS / originalPixels)
     targetWidth = Math.floor(originalWidth * scaleFactor)
@@ -91,16 +101,17 @@ async function normalizeInputImage(
       targetWidth,
       targetHeight,
       targetPixels: targetWidth * targetHeight,
+      aspectRatioPreserved: (targetWidth / targetHeight).toFixed(3),
     })
   }
 
-  // Step 2: Convert to PNG and resize
-  let pngBuffer = await sharp(inputBuffer)
+  // Step 3: Convert to PNG and resize (using rotated buffer, fit: "inside" preserves aspect ratio)
+  let pngBuffer = await sharp(rotatedBuffer)
     .resize(targetWidth, targetHeight, { fit: "inside", withoutEnlargement: true })
     .png({ compressionLevel: 6 })
     .toBuffer()
 
-  // Step 3: Ensure PNG is under 4MB for OpenAI fallback (max 3 attempts)
+  // Step 4: Ensure PNG is under 4MB for OpenAI fallback (max 3 attempts, preserve aspect ratio)
   let attempts = 0
   const maxAttempts = 3
   const scaleFactor = 0.85
@@ -121,7 +132,7 @@ async function normalizeInputImage(
       newHeight: targetHeight,
     })
 
-    pngBuffer = await sharp(inputBuffer)
+    pngBuffer = await sharp(rotatedBuffer)
       .resize(targetWidth, targetHeight, { fit: "inside", withoutEnlargement: true })
       .png({ compressionLevel: 9 }) // Max compression on retry
       .toBuffer()
@@ -138,6 +149,7 @@ async function normalizeInputImage(
     finalSize: pngBuffer.length,
     originalDimensions: `${originalWidth}x${originalHeight}`,
     finalDimensions: `${finalWidth}x${finalHeight}`,
+    aspectRatioPreserved: Math.abs((finalWidth / finalHeight) - aspectRatio) < 0.01,
     pixelReduction: originalPixels > finalWidth * finalHeight 
       ? `${((1 - (finalWidth * finalHeight) / originalPixels) * 100).toFixed(1)}%` 
       : "none",
@@ -285,7 +297,17 @@ async function generateStagedImage(params: {
         imageUrl: imageUrl.substring(0, 50) + "...",
         promptLength: stagingPrompt.length,
       })
-      const result = await generateWithOpenAI(imageUrl, stagingPrompt, requestId)
+      // Load and normalize image for OpenAI
+      let imageBuffer: Buffer
+      if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+        const response = await fetch(imageUrl)
+        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
+        imageBuffer = Buffer.from(await response.arrayBuffer())
+      } else {
+        imageBuffer = readFileSync(join(process.cwd(), "public", imageUrl))
+      }
+      const normalized = await normalizeInputImage(imageBuffer, requestId)
+      const result = await generateWithOpenAI(normalized.buffer, stagingPrompt, requestId)
       console.log(`[${requestId}] OpenAI generation succeeded`, {
         resultType: typeof result,
         resultPreview: result.substring(0, 50) + "...",
@@ -536,9 +558,12 @@ async function createInpaintingMask(
  * - Using the images.edits endpoint with both image and mask
  * - Using a non-negotiable explicit prompt
  * - Validating output before returning
+ * 
+ * Note: OpenAI DALL-E 2 edits API only supports square output sizes (256x256, 512x512, 1024x1024).
+ * The input image aspect ratio cannot be preserved in the output when using OpenAI as fallback.
  */
 async function generateWithOpenAI(
-  imageUrl: string,
+  normalizedImageBuffer: Buffer,
   prompt: string,
   requestId: string,
   negativePrompt?: string
@@ -548,33 +573,8 @@ async function generateWithOpenAI(
     throw new Error("OPENAI_API_KEY not set")
   }
 
-  // Resolve image path to absolute file path
-  let imagePath: string
-  let imageBuffer: Buffer
-  if (imageUrl.startsWith("/uploads/") || imageUrl.startsWith("/images/")) {
-    imagePath = join(process.cwd(), "public", imageUrl)
-    if (!existsSync(imagePath)) {
-      throw new Error(`Image file not found: ${imagePath}`)
-    }
-    imageBuffer = readFileSync(imagePath)
-  } else if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
-    // Fetch remote image
-    const response = await fetch(imageUrl)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image: HTTP ${response.status}`)
-    }
-    const arrayBuffer = await response.arrayBuffer()
-    imageBuffer = Buffer.from(arrayBuffer)
-    
-    // Save temporarily to /tmp (writable on Vercel)
-    const tempPath = join("/tmp", `temp_${Date.now()}.png`)
-    await writeFile(tempPath, imageBuffer)
-    imagePath = tempPath
-  } else {
-    throw new Error(`Invalid image URL format: ${imageUrl}`)
-  }
-
-  // imageBuffer is already loaded above
+  // Use the pre-normalized buffer directly (already PNG, already sized correctly)
+  const imageBuffer = normalizedImageBuffer
   
   // Compute SHA256 hash of input image for no-op detection
   const inputHash = createHash("sha256").update(imageBuffer).digest("hex")
@@ -702,11 +702,8 @@ async function generateWithOpenAI(
       body: formDataBuffer,
     })
 
-    // Clean up temp files
+    // Clean up temp mask file
     try {
-      if (imagePath.includes("temp_")) {
-        await unlink(imagePath)
-      }
       await unlink(maskPath)
     } catch {
       // Ignore cleanup errors
@@ -826,11 +823,8 @@ async function generateWithOpenAI(
     })
     throw new Error("OpenAI returned invalid response format")
   } catch (error: any) {
-    // Clean up temp files on error
+    // Clean up temp mask file on error
     try {
-      if (imagePath.includes("temp_")) {
-        await unlink(imagePath).catch(() => {})
-      }
       await unlink(maskPath).catch(() => {})
     } catch {
       // Ignore cleanup errors
@@ -1319,25 +1313,32 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
           }
         } catch (stabilityError: any) {
           console.warn(`[${requestId}] Stability AI failed, falling back to OpenAI:`, stabilityError.message)
-          // Fallback to OpenAI
+          // Fallback to OpenAI (use normalized buffer)
           if (hasOpenAI) {
             // Use resolved style prompts for OpenAI
             const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
-            const result = await generateWithOpenAI(imageUrl, openaiPrompt, requestId, finalNegative)
-            generatedImageBuffer = null // Will be fetched from URL
+            const result = await generateWithOpenAI(imageBuffer, openaiPrompt, requestId, finalNegative)
+            // OpenAI returns a URL, fetch and convert to buffer
+            const openaiResponse = await fetch(result)
+            if (openaiResponse.ok) {
+              generatedImageBuffer = Buffer.from(await openaiResponse.arrayBuffer())
+            }
             actualProviderUsed = "openai"
             actualPlannerUsed = "none"
-            // Will handle URL in save step
           } else {
             throw stabilityError
           }
         }
       } else if (selectedProvider === "openai") {
-        // Use existing OpenAI pipeline
+        // Use existing OpenAI pipeline (use normalized buffer)
         // Use resolved style prompts for OpenAI
         const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
-        const result = await generateWithOpenAI(imageUrl, openaiPrompt, requestId, finalNegative)
-        generatedImageBuffer = null // Will be fetched from URL
+        const result = await generateWithOpenAI(imageBuffer, openaiPrompt, requestId, finalNegative)
+        // OpenAI returns a URL, fetch and convert to buffer
+        const openaiResponse = await fetch(result)
+        if (openaiResponse.ok) {
+          generatedImageBuffer = Buffer.from(await openaiResponse.arrayBuffer())
+        }
         actualProviderUsed = "openai"
       } else {
         // Mock mode
@@ -1397,15 +1398,6 @@ ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}
           outputHash: createHash("sha256").update(generatedImageBuffer).digest("hex").substring(0, 16) + "...",
           inputHash: inputHash.substring(0, 16) + "...",
           blobUrl: generatedImageUrl,
-        })
-      } else if (actualProviderUsed === "openai") {
-        // Handle OpenAI URL output - fetch and upload to Blob
-        const openaiPrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
-        const result = await generateWithOpenAI(imageUrl, openaiPrompt, requestId, finalNegative)
-        generatedImageUrl = await uploadGeneratedImageToBlob({
-          data: result,
-          filename,
-          requestId,
         })
       } else if (actualProviderUsed === "mock") {
         // Handle mock mode: use a placeholder image
