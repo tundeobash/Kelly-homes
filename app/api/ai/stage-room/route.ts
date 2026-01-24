@@ -371,6 +371,11 @@ const MASK_FEATHER_RADIUS = 18 // Gaussian blur radius for edge feathering (pixe
 const MASK_TARGET_COVERAGE_MIN = 0.25 // Target 25-40% coverage
 const MASK_TARGET_COVERAGE_MAX = 0.40
 
+// Two-pass generation pipeline constants
+const ENABLE_TWO_PASS_GENERATION = true // Toggle for two-pass pipeline
+const PASS1_STRENGTH = 0.35 // Low strength for global coherence (0.25-0.40)
+const PASS2_STRENGTH = 0.75 // Normal strength for furniture inpaint (0.65-0.85)
+
 /**
  * Creates an inpainting mask PNG for AI inpainting APIs.
  * The mask must be the exact same dimensions as the input image.
@@ -1322,19 +1327,22 @@ export async function POST(request: Request) {
       if (selectedProvider === "stability") {
         // Try Gemini planner + Stability renderer
         try {
+          // Validate keys before calling
+          if (plannerUsed === "gemini" && !hasGemini) {
+            throw new Error("GEMINI_API_KEY not set")
+          }
+          if (!hasStability) {
+            throw new Error("STABILITY_API_KEY not set")
+          }
+          
+          // Build prompts
+          let plan: PlannerResult | null = null
+          let stabilityPrompt: string
+          
           if (plannerUsed === "gemini") {
-            // Validate keys before calling
-            if (!hasGemini) {
-              throw new Error("GEMINI_API_KEY not set")
-            }
-            if (!hasStability) {
-              throw new Error("STABILITY_API_KEY not set")
-            }
-            
             console.log(`[${requestId}] Using Gemini planner + Stability renderer`)
             
             // Try Gemini planner with fallback
-            let plan: PlannerResult
             try {
               const imageBase64 = imageBuffer.toString("base64")
               plan = await planRoomDesign({
@@ -1346,74 +1354,97 @@ export async function POST(request: Request) {
               })
             } catch (geminiError: any) {
               console.warn(`[${requestId}] Gemini planner failed, using fallback plan:`, geminiError.message)
-              // Use fallback plan so Stability can still run
               plan = createFallbackPlan({
                 style,
-                prompt: finalPositive, // Use resolved style prompt instead of raw prompt
+                prompt: finalPositive,
                 moreFurniture: moreFurniture || false,
               })
             }
 
-            // Build final prompt with plan, incorporating style prompts and continuity constraints
             const planJsonText = JSON.stringify(plan.planJson, null, 2)
             const stabilityPositive = finalPositive || `Edit this exact room photo. Add furniture per plan. Must visibly change room.`
-            const stabilityPrompt = `${stabilityPositive}
+            stabilityPrompt = `${stabilityPositive}
 
 ${CONTINUITY_CONSTRAINTS}
 
 Staging Plan:
 ${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
-
-            // Check if mask inversion is enabled for Stability
-            const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false" // Default to true
-            const maskForStability = await createInpaintingMask(
-              imageBuffer,
-              requestId,
-              stabilityMaskInvert
-            )
-            
-            // Use stronger default for Stability (0.8) for more visible changes
-            const stabilityStrength = parseFloat(process.env.STABILITY_STRENGTH || "0.8")
-            
-            generatedImageBuffer = await renderWithStability({
-              imageBuffer,
-              prompt: stabilityPrompt, // Use resolved prompt with style prompts
-              strength: stabilityStrength,
-              maskBuffer: maskForStability,
-              requestId,
-            })
             actualPlannerUsed = "gemini"
           } else {
-            // Stability without Gemini (simpler prompt)
-            // Validate key before calling
-            if (!hasStability) {
-              throw new Error("STABILITY_API_KEY not set")
+            console.log(`[${requestId}] Using Stability renderer (no planner)`)
+            const stabilityPositive = finalPositive || `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Must visibly change room.`
+            stabilityPrompt = `${stabilityPositive}\n\n${CONTINUITY_CONSTRAINTS}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
+          }
+          
+          // Check if mask inversion is enabled for Stability
+          const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false"
+          
+          // TWO-PASS GENERATION PIPELINE
+          if (ENABLE_TWO_PASS_GENERATION) {
+            console.log(`[${requestId}] Starting two-pass generation pipeline`)
+            
+            // ============ PASS 1: Global Coherence ============
+            // Low-strength full-image generation for lighting/material/perspective coherence
+            const pass1Prompt = `Enhance this room photo for ${style} style. ${CONTINUITY_CONSTRAINTS}
+Improve lighting consistency, surface materials, and atmospheric coherence.
+Do not add or remove furniture. Maintain exact camera angle and room structure.
+Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
+            
+            console.log(`[${requestId}] PASS 1 START: Global coherence (strength=${PASS1_STRENGTH})`)
+            let pass1Buffer: Buffer
+            try {
+              pass1Buffer = await renderWithStability({
+                imageBuffer,
+                prompt: pass1Prompt,
+                strength: PASS1_STRENGTH,
+                // No mask for full-image coherence pass
+                requestId: `${requestId}-pass1`,
+                mode: "image-to-image",
+              })
+              console.log(`[${requestId}] PASS 1 END: Success, output size=${pass1Buffer.length} bytes`)
+            } catch (pass1Error: any) {
+              console.warn(`[${requestId}] PASS 1 FAILED: ${pass1Error.message}, using original image for pass 2`)
+              pass1Buffer = imageBuffer // Fallback to original if pass 1 fails
             }
             
-            console.log(`[${requestId}] Using Stability renderer (no planner)`)
-            // Use resolved style prompt, or fallback to simple prompt if style not found
-            const stabilityPositive = finalPositive || `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Must visibly change room.`
-            const simplePrompt = `${stabilityPositive}\n\n${CONTINUITY_CONSTRAINTS}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
+            // ============ PASS 2: Furniture Inpainting ============
+            // Focused inpainting using feathered mask on coherent base
+            const maskForStability = await createInpaintingMask(
+              pass1Buffer, // Use pass 1 output as input for mask creation
+              requestId,
+              stabilityMaskInvert
+            )
             
-            // Check if mask inversion is enabled for Stability
-            const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false" // Default to true
+            console.log(`[${requestId}] PASS 2 START: Furniture inpainting (strength=${PASS2_STRENGTH})`)
+            generatedImageBuffer = await renderWithStability({
+              imageBuffer: pass1Buffer, // Use pass 1 output as input
+              prompt: stabilityPrompt,
+              strength: PASS2_STRENGTH,
+              maskBuffer: maskForStability,
+              requestId: `${requestId}-pass2`,
+              mode: "inpaint",
+            })
+            console.log(`[${requestId}] PASS 2 END: Success, output size=${generatedImageBuffer.length} bytes`)
+            
+          } else {
+            // Single-pass mode (legacy behavior)
+            console.log(`[${requestId}] Using single-pass generation`)
             const maskForStability = await createInpaintingMask(
               imageBuffer,
               requestId,
               stabilityMaskInvert
             )
-            
-            // Use stronger default for Stability (0.8) for more visible changes
             const stabilityStrength = parseFloat(process.env.STABILITY_STRENGTH || "0.8")
             
             generatedImageBuffer = await renderWithStability({
               imageBuffer,
-              prompt: simplePrompt,
+              prompt: stabilityPrompt,
               strength: stabilityStrength,
               maskBuffer: maskForStability,
               requestId,
             })
           }
+          
         } catch (stabilityError: any) {
           console.warn(`[${requestId}] Stability AI failed, falling back to OpenAI:`, stabilityError.message)
           // Fallback to OpenAI (use normalized buffer)
