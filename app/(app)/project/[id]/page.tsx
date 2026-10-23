@@ -67,6 +67,9 @@ export default async function ProjectPage({
   // Merge normalized data with recommendations and user
   const projectWithDesigns = {
     ...normalizedProject,
+    length: project.length,
+    width: project.width,
+    height: project.height,
     recommendations: project.recommendations,
     user: project.user,
   }

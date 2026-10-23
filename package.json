@@ -9,6 +9,7 @@
     "postinstall": "prisma generate",
     "start": "next start -p 3001",
     "lint": "next lint",
+    "test": "tsx --test tests/*.test.ts",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio"

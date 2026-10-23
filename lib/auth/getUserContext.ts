@@ -15,7 +15,38 @@ export interface UserContext {
   fallbackUsed?: boolean
 }
 
+/**
+ * The signed-in user owns their projects.
+ * Development fallbacks apply only when nobody is signed in.
+ */
+export function chooseUserId(input: {
+  sessionUserId?: string | null
+  devMode: boolean
+  devFallbackUserId?: string | null
+}): string | null {
+  const sessionUserId = input.sessionUserId?.trim() || ""
+  if (sessionUserId) return sessionUserId
+  if (!input.devMode) return null
+  return input.devFallbackUserId?.trim() || null
+}
+
 export async function getUserContext(): Promise<UserContext | null> {
+  const session = await getServerSession(authOptions)
+  const sessionUserId = chooseUserId({
+    sessionUserId: session?.user?.id,
+    devMode: DEV_MODE,
+  })
+  if (sessionUserId) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[getUserContext] Using signed-in user")
+    }
+    return {
+      userId: sessionUserId,
+      isDevMode: DEV_MODE,
+      fallbackUsed: false,
+    }
+  }
+
   if (DEV_MODE) {
     // Prioritize explicit DEV_USER_ID from environment
     const explicitDevUserId = process.env.DEV_USER_ID
@@ -124,12 +155,5 @@ export async function getUserContext(): Promise<UserContext | null> {
     }
   }
 
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
-    return null
-  }
-  return {
-    userId: session.user.id,
-    isDevMode: false,
-  }
+  return null
 }

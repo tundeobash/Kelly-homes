@@ -9,7 +9,17 @@ import { existsSync } from "fs"
 import { createHash } from "crypto"
 import sharp from "sharp"
 import { planRoomDesign, createFallbackPlan, PlannerResult } from "@/lib/ai/geminiPlanner"
-import { renderWithStability } from "@/lib/ai/stabilityRenderer"
+import {
+  assessRoomOutput,
+  buildGenerationPrompts,
+  ensureRoomPlan,
+  inspectGeneratedRoom,
+  resolveRoomType,
+} from "@/lib/ai/roomFurnishing"
+import { renderWithStability, StabilityGenerationError, sanitizeProviderError } from "@/lib/ai/stabilityRenderer"
+import { runTwoPassStability } from "@/lib/ai/twoPassGeneration"
+import { decideImageProvider, stageLabel } from "@/lib/ai/generationPolicy"
+import { InvalidImageError, UnchangedImageError, validateGeneratedImage, sha256 } from "@/lib/ai/generationValidation"
 import { stylePrompts } from "@/lib/stylePrompts"
 import { put } from "@vercel/blob"
 
@@ -246,8 +256,7 @@ async function generateStagedImage(params: {
   
   // Check for FORCE_MOCK_AI flag
   if (process.env.FORCE_MOCK_AI === "true") {
-    console.log(`[${requestId}] FORCE_MOCK_AI=true, using placeholder`)
-    return "mock"
+    throw new Error("Mock generation is turned off. A placeholder image is not returned as a finished design.")
   }
 
   const hasOpenAI = !!process.env.OPENAI_API_KEY
@@ -355,8 +364,7 @@ ${CONTINUITY_CONSTRAINTS}`
 
   // All providers failed - only use mock if explicitly allowed
   if (process.env.NODE_ENV === "development" && process.env.ALLOW_MOCK_FALLBACK === "true") {
-    console.warn(`[${requestId}] All providers failed, using placeholder fallback (dev mode)`)
-    return "mock"
+    throw new Error("Mock generation is turned off. A placeholder image is not returned as a finished design.")
   }
 
   // In production or without explicit fallback flag, throw error
@@ -1000,7 +1008,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture } = body
+    const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture, roomType: requestedRoomType } = body
 
     // Resolve style to prompt using stylePrompts
     const styleKey = (style || "").toLowerCase()
@@ -1062,6 +1070,7 @@ export async function POST(request: Request) {
               id: true,
               userId: true,
               imageUrl: true,
+              roomType: true,
               aiDesignsJson: true,
             },
           })
@@ -1086,6 +1095,7 @@ export async function POST(request: Request) {
             id: true,
             userId: true,
             imageUrl: true,
+            roomType: true,
             aiDesignsJson: true,
           },
         })
@@ -1149,11 +1159,25 @@ export async function POST(request: Request) {
       )
     }
 
+    const resolvedRoomType = resolveRoomType({
+      requested: typeof requestedRoomType === "string" ? requestedRoomType : "",
+      saved: project?.roomType,
+    })
+
+    console.log(`[${requestId}] Room type received`, {
+      fromRequest: typeof requestedRoomType === "string" && requestedRoomType.trim()
+        ? requestedRoomType.trim()
+        : null,
+      fromProject: project?.roomType || null,
+      resolved: resolvedRoomType || "unspecified",
+    })
+
     // Log request details
     console.log(`[${requestId}] Starting generation`, {
       userId,
       projectId: projectId || "none",
       style,
+      roomType: resolvedRoomType || "unspecified",
       prompt: prompt || "none",
       moreFurniture: moreFurniture || false,
       imageUrl: imageUrl.substring(0, 50) + "...",
@@ -1173,84 +1197,41 @@ export async function POST(request: Request) {
       forceMock,
     })
     
-    // Determine which provider to use (prioritize Stability + Gemini, fallback to OpenAI)
-    let selectedProvider: "stability" | "openai" | "mock" = "mock"
-    let plannerUsed: "gemini" | "none" = "none"
-    
-    if (forceMock) {
-      selectedProvider = "mock"
-    } else if (hasStability && hasGemini) {
-      // Preferred: Gemini planner + Stability renderer
-      selectedProvider = "stability"
-      plannerUsed = "gemini"
-    } else if (hasStability) {
-      // Stability without Gemini planner (use simple prompt)
-      selectedProvider = "stability"
-      plannerUsed = "none"
-    } else if (hasOpenAI) {
-      // Fallback to OpenAI
-      selectedProvider = "openai"
-      plannerUsed = "none"
-    }
+    const providerDecision = decideImageProvider({
+      forceMock,
+      hasStability,
+      hasGemini,
+      hasOpenAI,
+    })
 
     console.log(`[${requestId}] Provider selection`, {
       hasStabilityKey: hasStability,
       hasGeminiKey: hasGemini,
       hasOpenAIKey: hasOpenAI,
       forceMock,
-      selectedProvider,
-      plannerUsed,
+      provider: providerDecision.ok ? providerDecision.provider : "none",
+      planner: providerDecision.ok ? providerDecision.planner : "none",
     })
-    
-    // Validate required keys before attempting generation
-    if (selectedProvider === "stability" && plannerUsed === "gemini") {
-      // Both keys required for Gemini + Stability pipeline
-      if (!hasGemini) {
-        console.error(`[${requestId}] Missing required GEMINI_API_KEY for planner`)
-        return NextResponse.json(
-          {
-            success: false,
-            errorMessage: "Missing GEMINI_API_KEY. Please configure the API key in your environment variables.",
-            errorCode: "MISSING_GEMINI_KEY",
-            retryable: false,
-            requestId,
-          },
-          { status: 500 }
-        )
-      }
-      if (!hasStability) {
-        console.error(`[${requestId}] Missing required STABILITY_API_KEY for renderer`)
-        return NextResponse.json(
-          {
-            success: false,
-            errorMessage: "Missing STABILITY_API_KEY. Please configure the API key in your environment variables.",
-            errorCode: "MISSING_STABILITY_KEY",
-            retryable: false,
-            requestId,
-          },
-          { status: 500 }
-        )
-      }
-    } else if (selectedProvider === "stability" && plannerUsed === "none") {
-      // Only Stability key required
-      if (!hasStability) {
-        console.error(`[${requestId}] Missing required STABILITY_API_KEY for renderer`)
-        return NextResponse.json(
-          {
-            success: false,
-            errorMessage: "Missing STABILITY_API_KEY. Please configure the API key in your environment variables.",
-            errorCode: "MISSING_STABILITY_KEY",
-            retryable: false,
-            requestId,
-          },
-          { status: 500 }
-        )
-      }
+
+    if (!providerDecision.ok) {
+      console.error(`[${requestId}] Generation rejected`, {
+        provider: "none",
+        stage: providerDecision.stage,
+        status: null,
+        error: providerDecision.errorMessage,
+      })
+      return NextResponse.json({
+        success: false,
+        errorMessage: providerDecision.errorMessage,
+        errorCode: providerDecision.errorCode,
+        retryable: false,
+        requestId,
+        stage: providerDecision.stage,
+      })
     }
 
-    if (selectedProvider === "mock" && !forceMock) {
-      console.warn(`[${requestId}] No AI provider configured. Using mock generation.`)
-    }
+    const selectedProvider = providerDecision.provider
+    const plannerUsed = providerDecision.planner
 
     // Read image from disk for processing
     let imageBuffer: Buffer
@@ -1320,7 +1301,7 @@ export async function POST(request: Request) {
 
     // Generate image with retry
     let generatedImageBuffer: Buffer | null = null
-    let actualProviderUsed: "stability" | "openai" | "mock" = selectedProvider
+    let actualProviderUsed: "stability" | "openai" = selectedProvider
     let actualPlannerUsed: "gemini" | "none" = plannerUsed
     
     try {
@@ -1335,97 +1316,99 @@ export async function POST(request: Request) {
             throw new Error("STABILITY_API_KEY not set")
           }
           
-          // Build prompts
+          // Build a room-specific furnishing plan, then the two generation prompts.
           let plan: PlannerResult | null = null
-          let stabilityPrompt: string
+          let fallbackPlanning = plannerUsed !== "gemini"
+          let fallbackReason = plannerUsed === "gemini" ? "" : "Gemini planner was not used"
           
           if (plannerUsed === "gemini") {
             console.log(`[${requestId}] Using Gemini planner + Stability renderer`)
             
-            // Try Gemini planner with fallback
             try {
               const imageBase64 = imageBuffer.toString("base64")
               plan = await planRoomDesign({
                 style,
+                roomType: resolvedRoomType,
                 prompt: prompt,
                 imageBase64,
                 moreFurniture: moreFurniture || false,
                 requestId,
               })
-            } catch (geminiError: any) {
-              console.warn(`[${requestId}] Gemini planner failed, using fallback plan:`, geminiError.message)
-              plan = createFallbackPlan({
+              const ensured = ensureRoomPlan(plan, {
+                roomType: resolvedRoomType,
                 style,
-                prompt: finalPositive,
                 moreFurniture: moreFurniture || false,
               })
+              plan = ensured.plan
+              fallbackPlanning = ensured.fallbackUsed
+              fallbackReason = ensured.reason
+              actualPlannerUsed = ensured.fallbackUsed ? "none" : "gemini"
+            } catch (geminiError: any) {
+              console.warn(`[${requestId}] Gemini planner failed, using room-specific fallback plan:`, geminiError.message)
+              plan = createFallbackPlan({
+                style,
+                roomType: resolvedRoomType,
+                moreFurniture: moreFurniture || false,
+              })
+              fallbackPlanning = true
+              fallbackReason = "Gemini planner failed"
+              actualPlannerUsed = "none"
             }
-
-            const planJsonText = JSON.stringify(plan.planJson, null, 2)
-            const stabilityPositive = finalPositive || `Edit this exact room photo. Add furniture per plan. Must visibly change room.`
-            stabilityPrompt = `${stabilityPositive}
-
-${CONTINUITY_CONSTRAINTS}
-
-Staging Plan:
-${planJsonText}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
-            actualPlannerUsed = "gemini"
           } else {
-            console.log(`[${requestId}] Using Stability renderer (no planner)`)
-            const stabilityPositive = finalPositive || `Edit this room photo in ${style} style. Add NEW furniture that is clearly visible: a sofa, a coffee table, and a rug. Must visibly change room.`
-            stabilityPrompt = `${stabilityPositive}\n\n${CONTINUITY_CONSTRAINTS}${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
+            console.log(`[${requestId}] Using Stability renderer with a room-specific fallback plan`)
+            plan = createFallbackPlan({
+              style,
+              roomType: resolvedRoomType,
+              moreFurniture: moreFurniture || false,
+            })
           }
+
+          console.log(`[${requestId}] Fallback planning`, {
+            used: fallbackPlanning,
+            reason: fallbackReason,
+            planRoomType: plan.planJson.roomType,
+            plannedItems: plan.planJson.addItems.map((item) => item.item),
+          })
+
+          const generationPrompts = buildGenerationPrompts({
+            roomType: resolvedRoomType,
+            style,
+            planText: JSON.stringify(plan.planJson),
+            stylePositive: finalPositive,
+            userPrompt,
+            negative: finalNegative,
+            continuity: CONTINUITY_CONSTRAINTS,
+          })
+          console.log(`[${requestId}] Generation prompt summary`, {
+            roomType: resolvedRoomType || "unspecified",
+            summary: generationPrompts.summary,
+          })
+          const stabilityPrompt = generationPrompts.pass2
           
           // Check if mask inversion is enabled for Stability
           const stabilityMaskInvert = process.env.STABILITY_MASK_INVERT !== "false"
           
           // TWO-PASS GENERATION PIPELINE
+          // Pass 2 does not send PASS2_STRENGTH. The inpaint endpoint has no strength field;
+          // the mask decides which pixels may change.
           if (ENABLE_TWO_PASS_GENERATION) {
-            console.log(`[${requestId}] Starting two-pass generation pipeline`)
-            
-            // ============ PASS 1: Global Coherence ============
-            // Low-strength full-image generation for lighting/material/perspective coherence
-            const pass1Prompt = `Enhance this room photo for ${style} style. ${CONTINUITY_CONSTRAINTS}
-Improve lighting consistency, surface materials, and atmospheric coherence.
-Do not add or remove furniture. Maintain exact camera angle and room structure.
-Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative prompts:\n${finalNegative}` : ""}`
-            
-            console.log(`[${requestId}] PASS 1 START: Global coherence (strength=${PASS1_STRENGTH})`)
-            let pass1Buffer: Buffer
-            try {
-              pass1Buffer = await renderWithStability({
-                imageBuffer,
-                prompt: pass1Prompt,
-                strength: PASS1_STRENGTH,
-                // No mask for full-image coherence pass
-                requestId: `${requestId}-pass1`,
-                mode: "image-to-image",
-              })
-              console.log(`[${requestId}] PASS 1 END: Success, output size=${pass1Buffer.length} bytes`)
-            } catch (pass1Error: any) {
-              console.warn(`[${requestId}] PASS 1 FAILED: ${pass1Error.message}, using original image for pass 2`)
-              pass1Buffer = imageBuffer // Fallback to original if pass 1 fails
-            }
-            
-            // ============ PASS 2: Furniture Inpainting ============
-            // Focused inpainting using feathered mask on coherent base
-            const maskForStability = await createInpaintingMask(
-              pass1Buffer, // Use pass 1 output as input for mask creation
-              requestId,
-              stabilityMaskInvert
-            )
-            
-            console.log(`[${requestId}] PASS 2 START: Furniture inpainting (strength=${PASS2_STRENGTH})`)
-            generatedImageBuffer = await renderWithStability({
-              imageBuffer: pass1Buffer, // Use pass 1 output as input
-              prompt: stabilityPrompt,
-              strength: PASS2_STRENGTH,
-              maskBuffer: maskForStability,
-              requestId: `${requestId}-pass2`,
-              mode: "inpaint",
+            console.log(`[${requestId}] Starting two-pass generation pipeline`, {
+              pass1Strength: PASS1_STRENGTH,
+              pass2StrengthNotSent: PASS2_STRENGTH,
             })
-            console.log(`[${requestId}] PASS 2 END: Success, output size=${generatedImageBuffer.length} bytes`)
-            
+
+            generatedImageBuffer = await runTwoPassStability({
+              imageBuffer,
+              pass1Prompt: generationPrompts.pass1,
+              pass2Prompt: stabilityPrompt,
+              pass1Strength: PASS1_STRENGTH,
+              requestId,
+              createMask: (source) =>
+                createInpaintingMask(source, requestId, stabilityMaskInvert),
+            })
+            console.log(`[${requestId}] Two-pass generation finished`, {
+              outputSize: generatedImageBuffer.length,
+            })
           } else {
             // Single-pass mode (legacy behavior)
             console.log(`[${requestId}] Using single-pass generation`)
@@ -1434,41 +1417,57 @@ Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative 
               requestId,
               stabilityMaskInvert
             )
-            const stabilityStrength = parseFloat(process.env.STABILITY_STRENGTH || "0.8")
-            
+
             generatedImageBuffer = await renderWithStability({
               imageBuffer,
               prompt: stabilityPrompt,
-              strength: stabilityStrength,
               maskBuffer: maskForStability,
               requestId,
+              mode: "inpaint",
+              stage: "inpaint",
             })
           }
           
-        } catch (stabilityError: any) {
-          console.warn(`[${requestId}] Stability AI failed, falling back to OpenAI:`, stabilityError.message)
-          // Fallback to OpenAI (use normalized buffer)
-          if (hasOpenAI) {
-            // Use resolved style prompts for OpenAI with continuity constraints
-            const basePrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
-            const openaiPrompt = `${basePrompt}\n\n${CONTINUITY_CONSTRAINTS}`
-            const result = await generateWithOpenAI(imageBuffer, openaiPrompt, requestId, finalNegative)
-            // OpenAI returns a URL, fetch and convert to buffer
-            const openaiResponse = await fetch(result)
-            if (openaiResponse.ok) {
-              generatedImageBuffer = Buffer.from(await openaiResponse.arrayBuffer())
-            }
-            actualProviderUsed = "openai"
-            actualPlannerUsed = "none"
-          } else {
-            throw stabilityError
-          }
+        } catch (stabilityError: unknown) {
+          const stage = stabilityError instanceof StabilityGenerationError
+            ? stabilityError.stage
+            : "stability"
+          const status = stabilityError instanceof StabilityGenerationError
+            ? stabilityError.status ?? null
+            : null
+          const message = stabilityError instanceof Error
+            ? stabilityError.message
+            : "Unknown error"
+          console.error(`[${requestId}] Stability generation failed`, {
+            provider: "stability",
+            stage,
+            status,
+            error: sanitizeProviderError(message),
+          })
+          throw stabilityError
         }
       } else if (selectedProvider === "openai") {
-        // Use existing OpenAI pipeline (use normalized buffer)
-        // Use resolved style prompts for OpenAI with continuity constraints
-        const basePrompt = finalPositive || `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged.`
-        const openaiPrompt = `${basePrompt}\n\n${CONTINUITY_CONSTRAINTS}`
+        // Used only when Stability is not configured. This still calls the retired
+        // DALL·E edits API and is not the repaired generation path.
+        const openaiPlan = createFallbackPlan({
+          style,
+          roomType: resolvedRoomType,
+          moreFurniture: moreFurniture || false,
+        })
+        const openaiPrompts = buildGenerationPrompts({
+          roomType: resolvedRoomType,
+          style,
+          planText: JSON.stringify(openaiPlan.planJson),
+          stylePositive: finalPositive,
+          userPrompt,
+          negative: finalNegative,
+          continuity: CONTINUITY_CONSTRAINTS,
+        })
+        console.log(`[${requestId}] Generation prompt summary`, {
+          roomType: resolvedRoomType || "unspecified",
+          summary: openaiPrompts.summary,
+        })
+        const openaiPrompt = openaiPrompts.pass2
         const result = await generateWithOpenAI(imageBuffer, openaiPrompt, requestId, finalNegative)
         // OpenAI returns a URL, fetch and convert to buffer
         const openaiResponse = await fetch(result)
@@ -1476,20 +1475,30 @@ Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative 
           generatedImageBuffer = Buffer.from(await openaiResponse.arrayBuffer())
         }
         actualProviderUsed = "openai"
-      } else {
-        // Mock mode
-        generatedImageBuffer = null
-        actualProviderUsed = "mock"
       }
-    } catch (error: any) {
-      console.error(`[${requestId}] Generation failed:`, error)
+    } catch (error: unknown) {
+      const stage = error instanceof StabilityGenerationError ? error.stage : "generation"
+      const status = error instanceof StabilityGenerationError ? error.status ?? null : null
+      const message = error instanceof Error ? error.message : "Unknown error"
+      const safeMessage = sanitizeProviderError(message)
+      console.error(`[${requestId}] Generation failed`, {
+        provider: error instanceof StabilityGenerationError ? error.provider : actualProviderUsed,
+        stage,
+        status,
+        error: safeMessage,
+      })
       return NextResponse.json(
         {
           success: false,
-          errorMessage: `Failed to generate image: ${error.message || "Unknown error"}`,
-          errorCode: "GENERATION_FAILED",
+          errorMessage: `Image generation failed during ${stageLabel(stage)}. ${safeMessage}`,
+          errorCode: error instanceof UnchangedImageError
+            ? "UNCHANGED_IMAGE"
+            : error instanceof StabilityGenerationError && /identical to the input/i.test(error.message)
+              ? "UNCHANGED_IMAGE"
+              : "GENERATION_FAILED",
           retryable: true,
           requestId,
+          stage,
         },
         { status: 200 }
       )
@@ -1499,92 +1508,130 @@ Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative 
     const sanitizedStyle = style.replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase()
     const filename = `design-${Date.now()}-${sanitizedStyle}.png`
 
-    // Upload image to Vercel Blob
-    let generatedImageUrl: string
-    let fallbackUsed = false
+    if (!generatedImageBuffer) {
+      console.error(`[${requestId}] Generation produced no image`, {
+        provider: actualProviderUsed,
+        stage: "validation",
+        status: null,
+        error: "The image service did not return a design.",
+      })
+      return NextResponse.json({
+        success: false,
+        errorMessage: "The image service did not return a design. Nothing was saved.",
+        errorCode: "NO_IMAGE",
+        retryable: true,
+        requestId,
+        stage: "validation",
+      })
+    }
+
     try {
-      // Handle Stability AI buffer output
-      if (generatedImageBuffer) {
-        // Validate output buffer
-        if (generatedImageBuffer.length < 200 * 1024) {
-          throw new Error(`Output too small: ${generatedImageBuffer.length} bytes < 200KB`)
-        }
+      validateGeneratedImage(generatedImageBuffer, [imageBuffer], { minBytes: 200 * 1024 })
+    } catch (validationError: unknown) {
+      const message = validationError instanceof Error
+        ? validationError.message
+        : "Generated image could not be used."
+      const errorCode = validationError instanceof UnchangedImageError
+        ? "UNCHANGED_IMAGE"
+        : validationError instanceof InvalidImageError
+          ? "INVALID_IMAGE"
+          : "INVALID_IMAGE"
+      console.error(`[${requestId}] Generation output rejected`, {
+        provider: actualProviderUsed,
+        stage: "validation",
+        status: null,
+        error: sanitizeProviderError(message),
+      })
+      return NextResponse.json({
+        success: false,
+        errorMessage: message,
+        errorCode,
+        retryable: true,
+        requestId,
+        stage: "validation",
+      })
+    }
 
-        // Check PNG signature (89 50 4E 47) or JPEG signature (FF D8 FF)
-        const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47])
-        const jpegSignature = Buffer.from([0xFF, 0xD8, 0xFF])
-        const isValidPNG = generatedImageBuffer.slice(0, 4).equals(pngSignature)
-        const isValidJPEG = generatedImageBuffer.slice(0, 3).equals(jpegSignature)
-
-        if (!isValidPNG && !isValidJPEG) {
-          throw new Error("Output is not a valid PNG or JPEG")
-        }
-
-        // Upload to Vercel Blob
-        generatedImageUrl = await uploadGeneratedImageToBlob({
-          data: generatedImageBuffer,
-          filename,
+    try {
+      const mimeType = generatedImageBuffer[0] === 0xff ? "image/jpeg" : "image/png"
+      const inspection = await inspectGeneratedRoom({
+        imageBase64: generatedImageBuffer.toString("base64"),
+        mimeType,
+        roomType: resolvedRoomType,
+        requestId,
+      })
+      const furnishing = assessRoomOutput(inspection, resolvedRoomType)
+      console.log(`[${requestId}] Output validation`, {
+        roomType: resolvedRoomType || "unspecified",
+        passed: furnishing.passed,
+        reason: furnishing.reason,
+        looksLike: inspection.looksLike || null,
+        furnitureCount: inspection.furniture.length,
+      })
+      if (!furnishing.passed) {
+        return NextResponse.json({
+          success: false,
+          errorMessage: furnishing.reason,
+          errorCode: furnishing.reason.toLowerCase().includes("empty") ? "EMPTY_ROOM" : "WRONG_ROOM_TYPE",
+          retryable: true,
           requestId,
+          stage: "furnishing-check",
         })
-
-        console.log(`[${requestId}] Uploaded Stability AI output to Blob`, {
-          provider: actualProviderUsed,
-          planner: actualPlannerUsed,
-          fileSize: generatedImageBuffer.length,
-          outputHash: createHash("sha256").update(generatedImageBuffer).digest("hex").substring(0, 16) + "...",
-          inputHash: inputHash.substring(0, 16) + "...",
-          blobUrl: generatedImageUrl,
-        })
-      } else if (actualProviderUsed === "mock") {
-        // Handle mock mode: use a placeholder image
-        fallbackUsed = true
-        
-        // Find a valid placeholder source
-        let placeholderBuffer: Buffer | null = null
-        
-        // 1. Try dedicated placeholder directory
-        const dedicatedPlaceholder = join(process.cwd(), "public", "placeholders", "design-placeholder.png")
-        if (existsSync(dedicatedPlaceholder)) {
-          placeholderBuffer = readFileSync(dedicatedPlaceholder)
-        } else {
-          // 2. Fallback to existing asset
-          const fallbackPath = join(process.cwd(), "public", "images", "skus", "sofas", "sofa_01.png")
-          if (existsSync(fallbackPath)) {
-            placeholderBuffer = readFileSync(fallbackPath)
-          }
-        }
-        
-        if (!placeholderBuffer) {
-          throw new Error("No placeholder image found for mock mode")
-        }
-        
-        // Upload placeholder to Vercel Blob
-        generatedImageUrl = await uploadGeneratedImageToBlob({
-          data: placeholderBuffer,
-          filename,
-          requestId,
-        })
-        
-        console.log(`[${requestId}] Uploaded placeholder to Blob`, {
-          bytes: placeholderBuffer.length,
-          blobUrl: generatedImageUrl,
-          fallbackUsed: true,
-        })
-      } else {
-        // This should not happen - all cases should be handled above
-        throw new Error("No image data to save")
       }
-    } catch (error: any) {
-      console.error(`[${requestId}] Failed to upload generated image:`, error)
+    } catch (inspectionError: unknown) {
+      const message = inspectionError instanceof Error
+        ? inspectionError.message
+        : "The furnishing check failed."
+      console.error(`[${requestId}] Output validation`, {
+        roomType: resolvedRoomType || "unspecified",
+        passed: false,
+        reason: sanitizeProviderError(message),
+      })
+      return NextResponse.json({
+        success: false,
+        errorMessage: "The redesign could not be checked for furniture, so it was not saved. Please try again.",
+        errorCode: "FURNISHING_CHECK_FAILED",
+        retryable: true,
+        requestId,
+        stage: "furnishing-check",
+      })
+    }
+
+    // Upload image to Vercel Blob only after the result is a real, changed, furnished image.
+    let generatedImageUrl: string
+    const fallbackUsed = false
+    try {
+      generatedImageUrl = await uploadGeneratedImageToBlob({
+        data: generatedImageBuffer,
+        filename,
+        requestId,
+      })
+
+      console.log(`[${requestId}] Uploaded generated image to Blob`, {
+        provider: actualProviderUsed,
+        planner: actualPlannerUsed,
+        fileSize: generatedImageBuffer.length,
+        outputHash: sha256(generatedImageBuffer).substring(0, 16) + "...",
+        inputHash: inputHash.substring(0, 16) + "...",
+      })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      const safeMessage = sanitizeProviderError(message)
+      console.error(`[${requestId}] Failed to store generated image`, {
+        provider: actualProviderUsed,
+        stage: "upload",
+        status: null,
+        error: safeMessage,
+      })
       return NextResponse.json(
         {
           success: false,
-          errorMessage: `Failed to upload generated image: ${error.message || "Unknown error"}`,
+          errorMessage: `The redesign was created but could not be stored. ${safeMessage}`,
           errorCode: "UPLOAD_IMAGE_FAILED",
           retryable: false,
           requestId,
-        },
-        { status: 500 }
+          stage: "upload",
+        }
       )
     }
 
@@ -1624,7 +1671,6 @@ Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative 
         console.log(`[${requestId}] Saved design to project`, {
           projectId,
           designId: savedDesignId,
-          imageUrl: generatedImageUrl,
         })
       } catch (error: any) {
         console.error(`[${requestId}] Failed to save design to project:`, error)
@@ -1636,7 +1682,6 @@ Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative 
     console.log(`[${requestId}] Generation successful`, {
       provider: actualProviderUsed,
       fallbackUsed,
-      imageUrl: generatedImageUrl,
       designId: savedDesignId,
     })
 
@@ -1649,17 +1694,24 @@ Subtle adjustments only for realistic rendering.${finalNegative ? `\n\nNegative 
       fallbackUsed,
       requestId,
     })
-  } catch (error: any) {
-    console.error(`[${requestId}] Unhandled error:`, error)
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Internal server error"
+    const safeMessage = sanitizeProviderError(message)
+    console.error(`[${requestId}] Unhandled error`, {
+      provider: "unknown",
+      stage: "request",
+      status: null,
+      error: safeMessage,
+    })
     return NextResponse.json(
       {
         success: false,
-        errorMessage: error.message || "Internal server error",
+        errorMessage: safeMessage,
         errorCode: "INTERNAL_ERROR",
         retryable: true,
         requestId,
-      },
-      { status: 200 }
+        stage: "request",
+      }
     )
   }
 }

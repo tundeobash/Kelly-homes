@@ -1,4 +1,5 @@
 import { generateText, getGeminiConfig } from "@/lib/ai/gemini"
+import { buildFallbackPlan, buildPlanningPrompt, normalizeRoomType } from "@/lib/ai/roomFurnishing"
 
 export interface StagingPlan {
   roomType: string
@@ -27,12 +28,13 @@ export interface PlannerResult {
  */
 export async function planRoomDesign(params: {
   style: string
+  roomType?: string
   prompt?: string
   imageBase64?: string
   moreFurniture?: boolean
   requestId?: string
 }): Promise<PlannerResult> {
-  const { style, prompt, imageBase64, moreFurniture, requestId = "unknown" } = params
+  const { style, roomType, prompt, imageBase64, moreFurniture, requestId = "unknown" } = params
 
   // Explicit env check at runtime
   const config = getGeminiConfig()
@@ -44,60 +46,17 @@ export async function planRoomDesign(params: {
   }
 
   console.log(`[GEMINI] [${requestId}] Using text model: ${config.textModel}`)
+  console.log(`[GEMINI] [${requestId}] Planning prompt room type`, {
+    roomType: normalizeRoomType(roomType) || "unspecified",
+  })
 
   try {
-
-    // Build the planning prompt
-    const planningPrompt = `Analyze this room photo and create a detailed staging plan in JSON format.
-
-Style: ${style}
-${prompt ? `Additional requirements: ${prompt}` : ""}
-${moreFurniture ? "Include more furniture items and decor." : ""}
-
-Return ONLY valid JSON with this exact structure (no markdown, no code blocks):
-{
-  "roomType": "living room" | "bedroom" | "dining room" | "kitchen" | "office" | "other",
-  "style": "${style}",
-  "addItems": [
-    {
-      "item": "sofa",
-      "placement": "on floor, center-left, facing window",
-      "scale": "large",
-      "material": "fabric",
-      "color": "navy blue",
-      "notes": "should be clearly visible"
-    },
-    {
-      "item": "coffee table",
-      "placement": "on floor, center, in front of sofa",
-      "scale": "medium",
-      "material": "wood",
-      "color": "natural wood",
-      "notes": "positioned for easy access"
-    },
-    {
-      "item": "rug",
-      "placement": "on floor, under sofa and coffee table",
-      "scale": "large",
-      "material": "wool",
-      "color": "beige",
-      "notes": "defines seating area"
-    }
-  ],
-  "avoid": [
-    "do not block doors or windows",
-    "preserve existing architecture",
-    "keep walls and ceiling unchanged"
-  ],
-  "lighting": "natural daylight with warm ambient lighting",
-  "colorPalette": ["navy blue", "beige", "natural wood", "white"]
-}
-
-Requirements:
-- Must include at least: sofa, coffee table, rug
-- Each item must have specific placement instructions
-- Avoid array must include preservation constraints
-- Return ONLY the JSON object, no other text.`
+    const planningPrompt = buildPlanningPrompt({
+      roomType,
+      style,
+      prompt,
+      moreFurniture,
+    })
 
     // Prepare image parts if provided
     const imageParts = imageBase64
@@ -163,10 +122,11 @@ Requirements:
  */
 export function createFallbackPlan(params: {
   style: string
+  roomType?: string
   prompt?: string
   moreFurniture?: boolean
 }): PlannerResult {
-  const { style, prompt, moreFurniture } = params
+  const { style, roomType, moreFurniture } = params
 
   const styleFurnitureMap: Record<string, { items: string[]; colors: string[] }> = {
     rustic: {
@@ -236,36 +196,16 @@ export function createFallbackPlan(params: {
   }
 
   const styleInfo = styleFurnitureMap[style] || {
-    items: ["sofa", "coffee table", "rug", "floor lamp"],
+    items: [],
     colors: ["neutral", "beige", "brown", "white"],
   }
 
-  const baseItems = [
-    { item: "sofa", placement: "on floor, center-left", scale: "large", material: "fabric", color: styleInfo.colors[0] },
-    { item: "coffee table", placement: "on floor, center, in front of sofa", scale: "medium", material: "wood", color: styleInfo.colors[1] },
-    { item: "rug", placement: "on floor, under sofa and coffee table", scale: "large", material: "wool", color: styleInfo.colors[2] },
-  ]
-
-  if (moreFurniture) {
-    baseItems.push(
-      { item: "floor lamp", placement: "on floor, behind sofa", scale: "medium", material: "metal", color: styleInfo.colors[3] },
-      { item: "side table", placement: "on floor, next to sofa", scale: "small", material: "wood", color: styleInfo.colors[1] }
-    )
-  }
-
-  const planJson: StagingPlan = {
-    roomType: "living room",
-    style: style,
-    addItems: baseItems,
-    avoid: ["do not block doors or windows", "preserve existing architecture", "keep walls and ceiling unchanged"],
-    lighting: "natural daylight with warm ambient lighting",
-    colorPalette: styleInfo.colors,
-  }
-
-  return {
-    planJson,
-    planText: JSON.stringify(planJson, null, 2),
-  }
+  return buildFallbackPlan({
+    roomType,
+    style,
+    moreFurniture,
+    colors: styleInfo.colors,
+  })
 }
 
 /**
@@ -274,13 +214,15 @@ export function createFallbackPlan(params: {
 export async function generateStagingPlan(params: {
   imageBuffer: Buffer
   style: string
+  roomType?: string
   refinePrompt?: string
   moreFurniture?: boolean
 }): Promise<PlannerResult> {
-  const { imageBuffer, style, refinePrompt, moreFurniture } = params
+  const { imageBuffer, style, roomType, refinePrompt, moreFurniture } = params
   const imageBase64 = imageBuffer.toString("base64")
   return planRoomDesign({
     style,
+    roomType,
     prompt: refinePrompt,
     imageBase64,
     moreFurniture,

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,6 +19,7 @@ import { Sparkles, Loader2 } from "lucide-react"
 import RoomPhotoUploader from "@/components/RoomPhotoUploader"
 import AiDesignGallery from "@/components/AiDesignGallery"
 import { fetchProjects, ProjectSummary } from "@/lib/api/projects"
+import { listProjectsForStudio, resolveStudioSelection } from "@/lib/ai/studioProjects"
 
 export default function AiStudioClient() {
   const router = useRouter()
@@ -30,6 +31,7 @@ export default function AiStudioClient() {
   const [projectsLoading, setProjectsLoading] = useState(true)
   const [projectsError, setProjectsError] = useState<string | null>(null)
   const [selectedStyle, setSelectedStyle] = useState<string>("")
+  const [selectedRoomType, setSelectedRoomType] = useState<string>("")
   const [refinePrompt, setRefinePrompt] = useState<string>("")
   const [generatedDesigns, setGeneratedDesigns] = useState<
     Array<{ id: string; imageUrl: string; style: string }>
@@ -41,17 +43,21 @@ export default function AiStudioClient() {
   const [moreFurniture, setMoreFurniture] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string | null>(null)
+  const appliedUrlProjectId = useRef<string | null>(null)
 
   const loadProjects = async () => {
     try {
       setProjectsLoading(true)
       setProjectsError(null)
       const data = await fetchProjects()
-      setProjects(data)
+      setProjects(listProjectsForStudio(data))
       setProjectsError(null)
       
       if (projectIdParam && data.length > 0) {
         const projectFromList = data.find((p) => p.id === projectIdParam)
+        if (projectFromList?.roomType) {
+          setSelectedRoomType(projectFromList.roomType)
+        }
         if (projectFromList && projectFromList.imageUrl) {
           if (process.env.NODE_ENV === "development") {
             console.log("[AI Studio] Auto-loaded photo from projects list:", {
@@ -76,11 +82,28 @@ export default function AiStudioClient() {
 
   useEffect(() => {
     loadProjects()
-  }, [])
+  }, [projectIdParam])
+
+  useEffect(() => {
+    const urlChanged = appliedUrlProjectId.current !== projectIdParam
+    if (urlChanged) {
+      appliedUrlProjectId.current = projectIdParam
+    }
+    setSelectedProjectId((current) =>
+      resolveStudioSelection({
+        urlProjectId: projectIdParam,
+        currentSelection: current,
+        urlChanged,
+      })
+    )
+  }, [projectIdParam])
 
   useEffect(() => {
     if (selectedProjectId) {
       const projectFromList = projects.find((p) => p.id === selectedProjectId)
+      if (projectFromList?.roomType) {
+        setSelectedRoomType(projectFromList.roomType)
+      }
       if (projectFromList && projectFromList.imageUrl) {
         if (process.env.NODE_ENV === "development") {
           console.log("[AI Studio] Loaded photo from projects list:", {
@@ -114,6 +137,9 @@ export default function AiStudioClient() {
               }
               return prevUrl
             })
+            if (project.roomType) {
+              setSelectedRoomType(project.roomType)
+            }
             if (project.aiDesigns && Array.isArray(project.aiDesigns) && project.aiDesigns.length > 0) {
               const savedDesigns = project.aiDesigns.map((d: any) => ({
                 id: d.id,
@@ -132,6 +158,7 @@ export default function AiStudioClient() {
       fetchProjectData()
     } else {
       setCurrentImageUrl("")
+      setSelectedRoomType("")
       setGeneratedDesigns([])
     }
   }, [selectedProjectId, projects])
@@ -151,6 +178,7 @@ export default function AiStudioClient() {
     }
 
     let imageUrlToUse: string | null = null
+    let roomTypeToSend = selectedRoomType
     
     if (currentImageUrl && currentImageUrl.trim() !== "" && !currentImageUrl.startsWith("blob:")) {
       imageUrlToUse = currentImageUrl
@@ -169,6 +197,10 @@ export default function AiStudioClient() {
         const projectRes = await fetch(`/api/projects/${selectedProjectId}`)
         if (projectRes.ok) {
           const project = await projectRes.json()
+          if (project.roomType) {
+            roomTypeToSend = project.roomType
+            setSelectedRoomType(project.roomType)
+          }
           if (project.imageUrl && project.imageUrl.trim() !== "" && !project.imageUrl.startsWith("blob:")) {
             imageUrlToUse = project.imageUrl
             setCurrentImageUrl(project.imageUrl)
@@ -199,6 +231,7 @@ export default function AiStudioClient() {
           projectId: selectedProjectId,
           imageUrl: imageUrlToUse,
           style: selectedStyle,
+          roomType: roomTypeToSend || undefined,
           prompt: refinePrompt || undefined,
           moreFurniture,
         }),
@@ -451,7 +484,7 @@ export default function AiStudioClient() {
                   </Button>
                 </div>
               )}
-              {projectIdParam && (
+              {projectIdParam && selectedProjectId === projectIdParam && (
                 <p className="text-xs text-muted-foreground">
                   Using current project from URL
                 </p>

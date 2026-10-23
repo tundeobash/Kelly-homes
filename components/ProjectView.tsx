@@ -19,6 +19,7 @@ import Link from "next/link"
 import { Sparkles, ShoppingCart, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import AiDesignGallery from "./AiDesignGallery"
+import { aiStudioPath } from "@/lib/ai/studioProjects"
 
 const RoomPreviewWithOverlay = dynamic(() => import("./RoomPreviewWithOverlay"), { ssr: false })
 
@@ -238,12 +239,21 @@ export default function ProjectView({
 
   return (
     <>
-      <div className="mb-8">
-        <h2 className="text-3xl font-bold mb-2">{project.name}</h2>
-        <p className="text-muted-foreground">
-          {project.roomType} • {project.length}ft × {project.width}ft ×{" "}
-          {project.height}ft
-        </p>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-3xl font-bold mb-2">{project.name}</h2>
+          <p className="text-muted-foreground">
+            {project.roomType} • {project.length}ft × {project.width}ft ×{" "}
+            {project.height}ft
+          </p>
+        </div>
+        <Button
+          onClick={() => router.push(aiStudioPath(project.id))}
+          className="w-full sm:w-auto"
+        >
+          <Sparkles className="mr-2 h-4 w-4" />
+          Generate AI Design
+        </Button>
       </div>
 
         <div className="grid lg:grid-cols-2 gap-8">
