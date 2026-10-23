@@ -1,6 +1,6 @@
 export type ProviderDecision =
-  | { ok: true; provider: "stability"; planner: "gemini" | "none" }
   | { ok: true; provider: "openai"; planner: "none" }
+  | { ok: true; provider: "stability"; planner: "gemini" | "none" }
   | {
       ok: false
       errorCode: "MOCK_DISABLED" | "NO_AI_PROVIDER"
@@ -10,15 +10,18 @@ export type ProviderDecision =
 
 /**
  * Choose an image provider from which keys exist.
- * A missing provider or an explicit mock flag is a failure, not a placeholder image.
- * OpenAI is selected only when Stability is not configured. It is not a silent
- * backup after a Stability failure.
+ *
+ * OpenAI image editing is the default: it won the 24 Oct 2026 comparison.
+ * The older Stability two-pass pipeline runs only when IMAGE_PROVIDER=stability,
+ * or when no OpenAI key is set. A missing provider or an explicit mock flag is
+ * a failure, never a placeholder image.
  */
 export function decideImageProvider(input: {
   forceMock: boolean
   hasStability: boolean
   hasGemini: boolean
   hasOpenAI: boolean
+  preferred?: string | null
 }): ProviderDecision {
   if (input.forceMock) {
     return {
@@ -30,33 +33,30 @@ export function decideImageProvider(input: {
     }
   }
 
-  if (input.hasStability) {
-    return {
-      ok: true,
-      provider: "stability",
-      planner: input.hasGemini ? "gemini" : "none",
-    }
+  const preferred = (input.preferred || "").trim().toLowerCase()
+  const stability = {
+    ok: true as const,
+    provider: "stability" as const,
+    planner: input.hasGemini ? ("gemini" as const) : ("none" as const),
   }
 
-  if (input.hasOpenAI) {
-    return {
-      ok: true,
-      provider: "openai",
-      planner: "none",
-    }
-  }
+  if (preferred === "stability" && input.hasStability) return stability
+  if (input.hasOpenAI) return { ok: true, provider: "openai", planner: "none" }
+  if (input.hasStability) return stability
 
   return {
     ok: false,
     errorCode: "NO_AI_PROVIDER",
     stage: "provider-selection",
     errorMessage:
-      "No image provider is configured. Set STABILITY_API_KEY to generate a redesign. A placeholder image was not created.",
+      "No image provider is configured. Set OPENAI_API_KEY to generate a redesign. A placeholder image was not created.",
   }
 }
 
 export function stageLabel(stage: string): string {
   switch (stage) {
+    case "render":
+      return "creating the design"
     case "pass1":
       return "the whole-room pass"
     case "pass2":

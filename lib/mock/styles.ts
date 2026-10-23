@@ -119,5 +119,26 @@ export const designStyles: DesignStyle[] = [
     tags: ["Tropical", "Lush", "Vibrant"],
     budgetLevel: "Mid",
   },
+  {
+    id: "modern-arabic",
+    name: "Modern Arabic",
+    description: "Warm sand and ivory tones with geometric carved wood, brass lanterns and calligraphy art.",
+    tags: ["Gulf", "Geometric", "Warm"],
+    budgetLevel: "High",
+  },
+  {
+    id: "contemporary-majlis",
+    name: "Contemporary Majlis",
+    description: "Long low seating around the room, a large rug and low tables, made for hosting guests.",
+    tags: ["Gulf", "Hosting", "Low seating"],
+    budgetLevel: "Mid",
+  },
+  {
+    id: "warm-modern-luxury",
+    name: "Warm Modern Luxury",
+    description: "Cream and champagne tones, curved sofas, marble and brushed brass with a statement light.",
+    tags: ["Luxurious", "Curved", "Warm"],
+    budgetLevel: "High",
+  },
 ]
 

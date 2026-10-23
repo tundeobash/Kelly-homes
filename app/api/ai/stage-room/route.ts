@@ -17,14 +17,32 @@ import {
   resolveRoomType,
 } from "@/lib/ai/roomFurnishing"
 import { renderWithStability, StabilityGenerationError, sanitizeProviderError } from "@/lib/ai/stabilityRenderer"
+import { buildOpenAIEditInstruction, OpenAIGenerationError, renderWithOpenAI } from "@/lib/ai/openaiRenderer"
 import { runTwoPassStability } from "@/lib/ai/twoPassGeneration"
 import { decideImageProvider, stageLabel } from "@/lib/ai/generationPolicy"
 import { InvalidImageError, UnchangedImageError, validateGeneratedImage, sha256 } from "@/lib/ai/generationValidation"
-import { stylePrompts } from "@/lib/stylePrompts"
+import { getStyleCard, getStylePrompt } from "@/lib/stylePrompts"
 import { put } from "@vercel/blob"
 
 // Ensure Node.js runtime for Gemini calls
 export const runtime = "nodejs"
+// One OpenAI edit takes about 30 s; the check and storage add a few more.
+export const maxDuration = 120
+
+/**
+ * Only photos stored by this app may be fetched: Vercel Blob uploads or files under /public.
+ * Anything else is refused so the server cannot be pointed at other addresses.
+ */
+function isAllowedImageUrl(url: string): boolean {
+  if (url.includes("..")) return false
+  if (url.startsWith("/uploads/") || url.startsWith("/images/")) return true
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === "https:" && parsed.hostname.endsWith(".public.blob.vercel-storage.com")
+  } catch {
+    return false
+  }
+}
 
 // Generate a unique request ID for logging
 function generateRequestId(): string {
@@ -239,136 +257,6 @@ async function uploadGeneratedImageToBlob(params: {
     console.error(`[${requestId}] Error uploading to Vercel Blob:`, error)
     throw new Error(`Failed to upload image to Blob: ${error.message}`)
   }
-}
-
-/**
- * Generate a staged room image using OpenAI or Gemini
- * Returns base64 image data or remote URL
- */
-async function generateStagedImage(params: {
-  imageUrl: string
-  style: string
-  prompt?: string
-  moreFurniture?: boolean
-  requestId: string
-}): Promise<string> {
-  const { imageUrl, style, prompt, moreFurniture, requestId } = params
-  
-  // Check for FORCE_MOCK_AI flag
-  if (process.env.FORCE_MOCK_AI === "true") {
-    throw new Error("Mock generation is turned off. A placeholder image is not returned as a finished design.")
-  }
-
-  const hasOpenAI = !!process.env.OPENAI_API_KEY
-  const hasGemini = !!process.env.GEMINI_API_KEY
-
-  console.log(`[${requestId}] Provider availability check`, {
-    hasOpenAIKey: hasOpenAI,
-    hasGeminiKey: hasGemini,
-  })
-
-  // Build style-specific furniture details
-  const styleFurnitureMap: Record<string, string> = {
-    rustic: "reclaimed wood coffee table, linen sofa, jute rug, warm floor lamp, wooden side table",
-    modern: "sleek sectional sofa, glass coffee table, geometric rug, modern floor lamp, metal side table",
-    minimalist: "simple low-profile sofa, minimalist coffee table, neutral rug, clean floor lamp, minimal decor",
-    scandinavian: "light wood coffee table, light-colored sofa, wool rug, simple floor lamp, natural wood side table",
-    industrial: "leather sofa, metal coffee table, dark rug, industrial floor lamp, metal side table",
-    "mid-century-modern": "retro sofa with tapered legs, mid-century coffee table, vintage rug, atomic floor lamp, teak side table",
-    bohemian: "colorful patterned sofa, eclectic coffee table, textured rug, boho floor lamp, decorative side table",
-    japandi: "low-profile sofa, minimalist wood coffee table, natural fiber rug, simple floor lamp, zen side table",
-    mediterranean: "warm-toned sofa, ornate coffee table, terracotta rug, Mediterranean floor lamp, carved side table",
-    coastal: "light-colored sofa, weathered wood coffee table, nautical rug, coastal floor lamp, beachy side table",
-    farmhouse: "comfortable sofa, farmhouse coffee table, rustic rug, vintage floor lamp, wooden side table",
-    transitional: "elegant sofa, transitional coffee table, classic rug, elegant floor lamp, refined side table",
-    "art-deco": "luxurious sofa, geometric coffee table, rich rug, art deco floor lamp, ornate side table",
-    "wabi-sabi": "simple natural sofa, imperfect wood coffee table, natural rug, simple floor lamp, handcrafted side table",
-    "tropical-modern": "modern sofa, tropical wood coffee table, vibrant rug, modern floor lamp, tropical side table",
-    contemporary: "comfortable modern sofa, contemporary coffee table, stylish rug, modern floor lamp, functional side table",
-  }
-  
-  const styleFurniture = styleFurnitureMap[style] || "sofa, coffee table, rug, floor lamp, side table"
-  
-  // Build the staging prompt - explicitly instruct to ADD NEW furniture in the transparent mask region
-  const furnitureNote = moreFurniture 
-    ? ` Add NEW furniture objects: ${styleFurniture}, additional decor items. Make them clearly visible and prominent.` 
-    : ` Add NEW furniture objects: ${styleFurniture}. Make them clearly visible and prominent.`
-  
-  const userPromptNote = prompt ? ` ${prompt}.` : ""
-  
-  // Strengthened prompt: explicitly add furniture, preserve architecture layout with continuity
-  const stagingPrompt = `Add new furniture and decor in the editable region. Stage this room photo in ${style} style.${furnitureNote}${userPromptNote} The furniture must be clearly visible, well-placed, and match the ${style} aesthetic. Do not return the original image unchanged. Photorealistic. No text, no watermark.
-
-${CONTINUITY_CONSTRAINTS}`
-
-  // Try OpenAI first if available
-  if (hasOpenAI) {
-    try {
-      console.log(`[${requestId}] Attempting OpenAI image generation`, {
-        imageUrl: imageUrl.substring(0, 50) + "...",
-        promptLength: stagingPrompt.length,
-      })
-      // Load and normalize image for OpenAI
-      let imageBuffer: Buffer
-      if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
-        const response = await fetch(imageUrl)
-        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
-        imageBuffer = Buffer.from(await response.arrayBuffer())
-      } else {
-        imageBuffer = readFileSync(join(process.cwd(), "public", imageUrl))
-      }
-      const normalized = await normalizeInputImage(imageBuffer, requestId)
-      const result = await generateWithOpenAI(normalized.buffer, stagingPrompt, requestId)
-      console.log(`[${requestId}] OpenAI generation succeeded`, {
-        resultType: typeof result,
-        resultPreview: result.substring(0, 50) + "...",
-      })
-      return result
-    } catch (error: any) {
-      console.error(`[${requestId}] OpenAI generation failed:`, {
-        error: error.message,
-        stack: error.stack?.substring(0, 200),
-      })
-      // Fall through to Gemini or mock only if explicitly in dev mode
-      if (process.env.NODE_ENV === "development" && process.env.ALLOW_MOCK_FALLBACK === "true") {
-        console.warn(`[${requestId}] Dev mode: allowing mock fallback after OpenAI failure`)
-      } else {
-        // In production, re-throw the error instead of silently falling back
-        throw error
-      }
-    }
-  }
-
-  // Try Gemini if available (and OpenAI not available or failed)
-  if (hasGemini) {
-    try {
-      console.log(`[${requestId}] Attempting Gemini image generation`)
-      const result = await generateWithGemini(imageUrl, stagingPrompt, requestId)
-      console.log(`[${requestId}] Gemini generation succeeded`)
-      return result
-    } catch (error: any) {
-      console.error(`[${requestId}] Gemini generation failed:`, error.message)
-      // Only fall through to mock in dev mode with explicit flag
-      if (process.env.NODE_ENV === "development" && process.env.ALLOW_MOCK_FALLBACK === "true") {
-        console.warn(`[${requestId}] Dev mode: allowing mock fallback after Gemini failure`)
-      } else {
-        throw error
-      }
-    }
-  }
-
-  // No providers available
-  if (!hasOpenAI && !hasGemini) {
-    throw new Error("No AI provider configured. Set OPENAI_API_KEY or GEMINI_API_KEY environment variable.")
-  }
-
-  // All providers failed - only use mock if explicitly allowed
-  if (process.env.NODE_ENV === "development" && process.env.ALLOW_MOCK_FALLBACK === "true") {
-    throw new Error("Mock generation is turned off. A placeholder image is not returned as a finished design.")
-  }
-
-  // In production or without explicit fallback flag, throw error
-  throw new Error("All AI providers failed. Check API keys and network connectivity.")
 }
 
 // Mask generation constants
@@ -668,306 +556,6 @@ Allow subtle lighting and surface adjustments to maintain seamless continuity.
 No visible seams or cut lines. Consistent wall shading and continuous surfaces.
 Consistent lighting direction and color temperature. Preserve global perspective and vanishing points.`.trim()
 
-/**
- * Generate staged image using OpenAI Images Edits API (inpainting)
- * This function FORCES a real inpainting edit by:
- * - Using the images.edits endpoint with both image and mask
- * - Using a non-negotiable explicit prompt
- * - Validating output before returning
- * 
- * Note: OpenAI DALL-E 2 edits API only supports square output sizes (256x256, 512x512, 1024x1024).
- * The input image aspect ratio cannot be preserved in the output when using OpenAI as fallback.
- */
-async function generateWithOpenAI(
-  normalizedImageBuffer: Buffer,
-  prompt: string,
-  requestId: string,
-  negativePrompt?: string
-): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY not set")
-  }
-
-  // Use the pre-normalized buffer directly (already PNG, already sized correctly)
-  const imageBuffer = normalizedImageBuffer
-  
-  // Compute SHA256 hash of input image for no-op detection
-  const inputHash = createHash("sha256").update(imageBuffer).digest("hex")
-  console.log(`[${requestId}] Input image hash`, {
-    hash: inputHash.substring(0, 16) + "...",
-    size: imageBuffer.length,
-  })
-  
-  // OpenAI Images Edits API requires images in RGBA, LA, or L format
-  // Convert the input image to RGBA format
-  console.log(`[${requestId}] Converting image to RGBA format`)
-  const rgbaImageBuffer = await sharp(imageBuffer)
-    .ensureAlpha() // Ensure alpha channel exists (converts RGB to RGBA)
-    .png()
-    .toBuffer()
-  
-  console.log(`[${requestId}] Image converted to RGBA`, {
-    originalSize: imageBuffer.length,
-    rgbaSize: rgbaImageBuffer.length,
-  })
-  
-  // For OpenAI Images Edits API (inpainting), we need a transparency-based mask:
-  // - TRANSPARENT pixels (alpha=0) = editable region (where furniture will be added)
-  // - OPAQUE pixels (alpha=255) = preserved region (walls, ceiling, windows)
-  // Use /tmp for mask file (writable on Vercel)
-  const maskPath = join("/tmp", `mask_${Date.now()}.png`)
-  
-  // Create an inpainting mask PNG with transparent editable region
-  // The mask must be in RGBA format with same dimensions as the image
-  const inpaintingMaskBuffer = await createInpaintingMask(rgbaImageBuffer, requestId)
-  await writeFile(maskPath, inpaintingMaskBuffer)
-  
-  // Log mask alpha statistics
-  try {
-    const maskMetadata = await sharp(inpaintingMaskBuffer).raw().toBuffer({ resolveWithObject: true })
-    const maskPixels = maskMetadata.data
-    let transparentCount = 0
-    let opaqueCount = 0
-    // RGBA format: every 4th byte (index 3, 7, 11, ...) is alpha
-    for (let i = 3; i < maskPixels.length; i += 4) {
-      if (maskPixels[i] === 0) {
-        transparentCount++
-      } else if (maskPixels[i] === 255) {
-        opaqueCount++
-      }
-    }
-    const totalPixels = maskPixels.length / 4
-    console.log(`[${requestId}] Mask alpha statistics`, {
-      totalPixels,
-      transparentPixels: transparentCount,
-      opaquePixels: opaqueCount,
-      transparentPercent: ((transparentCount / totalPixels) * 100).toFixed(2) + "%",
-      opaquePercent: ((opaqueCount / totalPixels) * 100).toFixed(2) + "%",
-    })
-  } catch (maskStatsError) {
-    console.warn(`[${requestId}] Failed to compute mask alpha stats:`, maskStatsError)
-  }
-  
-  // Use provided prompt (should already be resolved with style prompts)
-  // If prompt is empty or "none", use fallback
-  const resolvedPrompt = prompt && prompt !== "none" && prompt.trim() !== ""
-    ? prompt
-    : `Add NEW furniture that is clearly visible. At minimum add: a sofa, a coffee table, and a rug. Do not return the original image unchanged. Keep walls/lighting/layout consistent; only change within the editable region. Photorealistic. No text, no watermark.`
-  
-  // Append negative prompt if provided
-  const finalPrompt = negativePrompt 
-    ? `${resolvedPrompt}\n\nNegative prompts:\n${negativePrompt}`
-    : resolvedPrompt
-  
-  console.log(`[${requestId}] Calling OpenAI images.edits (inpaint)`, {
-    originalPromptLength: prompt.length,
-    resolvedPromptLength: finalPrompt.length,
-    imageSize: rgbaImageBuffer.length,
-    maskSize: inpaintingMaskBuffer.length,
-  })
-
-  try {
-    // Use multipart/form-data for OpenAI Images Edits API (Node.js compatible)
-    const boundary = `----WebKitFormBoundary${randomBytes(16).toString("hex")}`
-    const formDataParts: Buffer[] = []
-
-    // Add image (must be RGBA format)
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="image"; filename="room.png"\r\n`))
-    formDataParts.push(Buffer.from(`Content-Type: image/png\r\n\r\n`))
-    formDataParts.push(rgbaImageBuffer) // Use RGBA converted image
-    formDataParts.push(Buffer.from(`\r\n`))
-
-    // Add mask (must be same size as image, with transparent region for editing)
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="mask"; filename="mask.png"\r\n`))
-    formDataParts.push(Buffer.from(`Content-Type: image/png\r\n\r\n`))
-    formDataParts.push(inpaintingMaskBuffer)
-    formDataParts.push(Buffer.from(`\r\n`))
-
-    // Add prompt (use resolved prompt with style prompts)
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="prompt"\r\n\r\n`))
-    formDataParts.push(Buffer.from(finalPrompt))
-    formDataParts.push(Buffer.from(`\r\n`))
-
-    // Add n
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="n"\r\n\r\n`))
-    formDataParts.push(Buffer.from("1"))
-    formDataParts.push(Buffer.from(`\r\n`))
-
-    // Add size
-    formDataParts.push(Buffer.from(`--${boundary}\r\n`))
-    formDataParts.push(Buffer.from(`Content-Disposition: form-data; name="size"\r\n\r\n`))
-    formDataParts.push(Buffer.from("1024x1024"))
-    formDataParts.push(Buffer.from(`\r\n`))
-
-    // Close boundary
-    formDataParts.push(Buffer.from(`--${boundary}--\r\n`))
-
-    const formDataBuffer = Buffer.concat(formDataParts)
-
-    const response = await fetch("https://api.openai.com/v1/images/edits", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
-      },
-      body: formDataBuffer,
-    })
-
-    // Clean up temp mask file
-    try {
-      await unlink(maskPath)
-    } catch {
-      // Ignore cleanup errors
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      let errorMessage = `OpenAI API error: ${response.status}`
-      try {
-        const errorJson = JSON.parse(errorText)
-        errorMessage += ` - ${errorJson.error?.message || errorText}`
-      } catch {
-        errorMessage += ` - ${errorText.substring(0, 200)}`
-      }
-      console.error(`[${requestId}] OpenAI API error details:`, {
-        status: response.status,
-        statusText: response.statusText,
-        errorPreview: errorText.substring(0, 200),
-      })
-      throw new Error(errorMessage)
-    }
-
-    const data = await response.json()
-    
-    // OpenAI returns { data: [{ url: "https://..." }] }
-    if (data.data && data.data[0] && data.data[0].url) {
-      const returnedImageUrl = data.data[0].url
-      
-      // CRITICAL: Validate output BEFORE returning
-      // Fetch the returned image and validate it
-      console.log(`[${requestId}] Fetching returned image for validation`, {
-        url: returnedImageUrl.substring(0, 50) + "...",
-      })
-      
-      const imageResponse = await fetch(returnedImageUrl)
-      if (!imageResponse.ok) {
-        throw new Error(`Failed to fetch returned image: HTTP ${imageResponse.status}`)
-      }
-      
-      const outputArrayBuffer = await imageResponse.arrayBuffer()
-      const outputBuffer = Buffer.from(outputArrayBuffer)
-      const outputSize = outputBuffer.length
-      
-      // Log output file size and first 8 bytes
-      const first8Bytes = Array.from(outputBuffer.slice(0, 8))
-        .map(b => b.toString(16).padStart(2, "0"))
-        .join(" ")
-      console.log(`[${requestId}] Output validation`, {
-        fileSize: outputSize,
-        first8BytesHex: first8Bytes,
-        first8BytesDecimal: Array.from(outputBuffer.slice(0, 8)).join(", "),
-      })
-      
-      // Check 1: Verify PNG signature (89 50 4E 47 0D 0A 1A 0A) or JPEG signature (FF D8 FF)
-      const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-      const jpegSignature = Buffer.from([0xFF, 0xD8, 0xFF])
-      const isValidPNG = outputBuffer.slice(0, 8).equals(pngSignature)
-      const isValidJPEG = outputBuffer.slice(0, 3).equals(jpegSignature)
-      
-      if (!isValidPNG && !isValidJPEG) {
-        console.error(`[${requestId}] OUTPUT_INVALID_FORMAT: Not a valid PNG or JPEG`, {
-          first8BytesHex: first8Bytes,
-          expectedPNG: "89 50 4E 47 0D 0A 1A 0A",
-          expectedJPEG: "FF D8 FF",
-        })
-        throw new Error("OUTPUT_INVALID_FORMAT: Returned image is not a valid PNG or JPEG")
-      }
-      
-      // Check 2: Reject if file size < 50KB
-      if (outputSize < 50 * 1024) {
-        console.error(`[${requestId}] OUTPUT_TOO_SMALL: File size ${outputSize} bytes < 50KB`, {
-          fileSize: outputSize,
-          minSize: 50 * 1024,
-        })
-        throw new Error(`OUTPUT_TOO_SMALL: Returned image is too small (${outputSize} bytes < 50KB)`)
-      }
-      
-      // Check 3: Compare input hash vs output hash (quick check: first 100KB)
-      const inputFirst100KB = imageBuffer.slice(0, Math.min(100 * 1024, imageBuffer.length))
-      const outputFirst100KB = outputBuffer.slice(0, Math.min(100 * 1024, outputBuffer.length))
-      
-      if (inputFirst100KB.length === outputFirst100KB.length && 
-          inputFirst100KB.equals(outputFirst100KB)) {
-        console.error(`[${requestId}] MODEL_RETURNED_UNCHANGED_IMAGE: First 100KB identical`, {
-          inputSize: imageBuffer.length,
-          outputSize: outputSize,
-          first100KBIdentical: true,
-        })
-        throw new Error("MODEL_RETURNED_UNCHANGED_IMAGE: First 100KB of output matches input (likely unchanged)")
-      }
-      
-      // Check 4: Full hash comparison
-      const outputHash = createHash("sha256").update(outputBuffer).digest("hex")
-      if (inputHash === outputHash) {
-        console.error(`[${requestId}] MODEL_RETURNED_UNCHANGED_IMAGE: Full hash identical`, {
-          inputHash: inputHash.substring(0, 16) + "...",
-          outputHash: outputHash.substring(0, 16) + "...",
-        })
-        throw new Error("MODEL_RETURNED_UNCHANGED_IMAGE: Output hash identical to input (unchanged image)")
-      }
-      
-      console.log(`[${requestId}] OpenAI inpainting successful and validated`, {
-        imageUrl: returnedImageUrl.substring(0, 50) + "...",
-        outputSize,
-        inputHash: inputHash.substring(0, 8) + "...",
-        outputHash: outputHash.substring(0, 8) + "...",
-        format: isValidPNG ? "PNG" : "JPEG",
-      })
-      
-      return returnedImageUrl
-    }
-
-    console.error(`[${requestId}] OpenAI returned invalid response format:`, {
-      hasData: !!data.data,
-      dataLength: data.data?.length,
-      firstItem: data.data?.[0],
-    })
-    throw new Error("OpenAI returned invalid response format")
-  } catch (error: any) {
-    // Clean up temp mask file on error
-    try {
-      await unlink(maskPath).catch(() => {})
-    } catch {
-      // Ignore cleanup errors
-    }
-    throw error
-  }
-}
-
-/**
- * Generate staged image using Gemini (if supported)
- */
-async function generateWithGemini(
-  imageUrl: string,
-  prompt: string,
-  requestId: string
-): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY not set")
-  }
-
-  // Gemini image generation is not directly supported in the same way as OpenAI
-  // For now, log that Gemini path is not implemented and throw
-  console.warn(`[${requestId}] Gemini image generation not yet implemented`)
-  throw new Error("Gemini image generation not implemented. Use OpenAI or set FORCE_MOCK_AI=true")
-}
-
 export async function POST(request: Request) {
   const requestId = generateRequestId()
   
@@ -1010,12 +598,14 @@ export async function POST(request: Request) {
 
     const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture, roomType: requestedRoomType } = body
 
-    // Resolve style to prompt using stylePrompts
-    const styleKey = (style || "").toLowerCase()
-    const stylePrompt = stylePrompts[styleKey]
-    
+    // Resolve the style card (every style in the app has one)
+    const styleKey = (typeof style === "string" ? style : "").toLowerCase()
+    const styleCard = getStyleCard(styleKey)
+    const stylePrompt = getStylePrompt(styleKey)
+
     // Handle user prompt: filter out "none" and empty strings
-    const userPrompt = prompt && prompt !== "none" && prompt.trim() !== "" ? prompt.trim() : ""
+    const userPrompt =
+      typeof prompt === "string" && prompt !== "none" && prompt.trim() !== "" ? prompt.trim().slice(0, 500) : ""
     
     // Build final prompts
     const finalPositive = [stylePrompt?.positive, userPrompt].filter(Boolean).join("\n\n")
@@ -1052,12 +642,35 @@ export async function POST(request: Request) {
       )
     }
 
+    if (!styleCard) {
+      console.error(`[${requestId}] Unknown style: ${styleKey}`)
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: "That style isn't available. Please choose another style.",
+          errorCode: "UNKNOWN_STYLE",
+          retryable: false,
+          requestId,
+        },
+        { status: 200 }
+      )
+    }
+
     // Get project and image URL
     let project: any = null
     let imageUrl: string | null = null
 
-    // If imageUrl is provided directly, use it (no need to fetch project)
-    if (providedImageUrl && providedImageUrl.trim() !== "" && !providedImageUrl.startsWith("blob:")) {
+    if (typeof providedImageUrl === "string" && providedImageUrl.trim() !== "" && !isAllowedImageUrl(providedImageUrl)) {
+      console.warn(`[${requestId}] Ignoring an image address that is not an app upload`)
+    }
+
+    // If an app-stored imageUrl is provided directly, use it (no need to fetch project)
+    if (
+      typeof providedImageUrl === "string" &&
+      providedImageUrl.trim() !== "" &&
+      !providedImageUrl.startsWith("blob:") &&
+      isAllowedImageUrl(providedImageUrl)
+    ) {
       imageUrl = providedImageUrl
       console.log(`[${requestId}] Using provided imageUrl directly (skipping project fetch)`)
       
@@ -1202,6 +815,7 @@ export async function POST(request: Request) {
       hasStability,
       hasGemini,
       hasOpenAI,
+      preferred: process.env.IMAGE_PROVIDER,
     })
 
     console.log(`[${requestId}] Provider selection`, {
@@ -1237,6 +851,9 @@ export async function POST(request: Request) {
     let imageBuffer: Buffer
     let inputHash: string
     try {
+      if (imageUrl.includes("..")) {
+        throw new Error("Invalid image path")
+      }
       if (imageUrl.startsWith("/uploads/") || imageUrl.startsWith("/images/")) {
         const imagePath = join(process.cwd(), "public", imageUrl)
         if (!existsSync(imagePath)) {
@@ -1303,6 +920,8 @@ export async function POST(request: Request) {
     let generatedImageBuffer: Buffer | null = null
     let actualProviderUsed: "stability" | "openai" = selectedProvider
     let actualPlannerUsed: "gemini" | "none" = plannerUsed
+    let actualModel: string = selectedProvider === "openai" ? "openai" : "stability-two-pass"
+    let estimatedCostUsd: number | null = null
     
     try {
       if (selectedProvider === "stability") {
@@ -1447,42 +1066,39 @@ export async function POST(request: Request) {
           throw stabilityError
         }
       } else if (selectedProvider === "openai") {
-        // Used only when Stability is not configured. This still calls the retired
-        // DALL·E edits API and is not the repaired generation path.
-        const openaiPlan = createFallbackPlan({
-          style,
+        // Default path: one OpenAI image edit, guided by the style card.
+        const instruction = buildOpenAIEditInstruction({
           roomType: resolvedRoomType,
-          moreFurniture: moreFurniture || false,
-        })
-        const openaiPrompts = buildGenerationPrompts({
-          roomType: resolvedRoomType,
-          style,
-          planText: JSON.stringify(openaiPlan.planJson),
-          stylePositive: finalPositive,
+          style: styleCard,
           userPrompt,
-          negative: finalNegative,
-          continuity: CONTINUITY_CONSTRAINTS,
+          moreFurniture: moreFurniture === true,
         })
-        console.log(`[${requestId}] Generation prompt summary`, {
+        console.log(`[${requestId}] OpenAI redesign`, {
           roomType: resolvedRoomType || "unspecified",
-          summary: openaiPrompts.summary,
+          style: styleCard.id,
+          instructionLength: instruction.length,
         })
-        const openaiPrompt = openaiPrompts.pass2
-        const result = await generateWithOpenAI(imageBuffer, openaiPrompt, requestId, finalNegative)
-        // OpenAI returns a URL, fetch and convert to buffer
-        const openaiResponse = await fetch(result)
-        if (openaiResponse.ok) {
-          generatedImageBuffer = Buffer.from(await openaiResponse.arrayBuffer())
-        }
+        const rendered = await renderWithOpenAI({
+          imageBuffer,
+          mimeType: "image/png",
+          prompt: instruction,
+          requestId,
+        })
+        generatedImageBuffer = rendered.buffer
         actualProviderUsed = "openai"
+        actualPlannerUsed = "none"
+        actualModel = rendered.model
+        estimatedCostUsd = rendered.costUsd
       }
     } catch (error: unknown) {
-      const stage = error instanceof StabilityGenerationError ? error.stage : "generation"
-      const status = error instanceof StabilityGenerationError ? error.status ?? null : null
+      const providerError =
+        error instanceof StabilityGenerationError || error instanceof OpenAIGenerationError ? error : null
+      const stage = providerError ? providerError.stage : "generation"
+      const status = providerError ? providerError.status ?? null : null
       const message = error instanceof Error ? error.message : "Unknown error"
       const safeMessage = sanitizeProviderError(message)
       console.error(`[${requestId}] Generation failed`, {
-        provider: error instanceof StabilityGenerationError ? error.provider : actualProviderUsed,
+        provider: providerError ? providerError.provider : actualProviderUsed,
         stage,
         status,
         error: safeMessage,
@@ -1493,7 +1109,7 @@ export async function POST(request: Request) {
           errorMessage: `Image generation failed during ${stageLabel(stage)}. ${safeMessage}`,
           errorCode: error instanceof UnchangedImageError
             ? "UNCHANGED_IMAGE"
-            : error instanceof StabilityGenerationError && /identical to the input/i.test(error.message)
+            : providerError && /identical to the input/i.test(providerError.message)
               ? "UNCHANGED_IMAGE"
               : "GENERATION_FAILED",
           retryable: true,
@@ -1552,49 +1168,58 @@ export async function POST(request: Request) {
       })
     }
 
-    try {
-      const mimeType = generatedImageBuffer[0] === 0xff ? "image/jpeg" : "image/png"
-      const inspection = await inspectGeneratedRoom({
-        imageBase64: generatedImageBuffer.toString("base64"),
-        mimeType,
-        roomType: resolvedRoomType,
-        requestId,
-      })
-      const furnishing = assessRoomOutput(inspection, resolvedRoomType)
-      console.log(`[${requestId}] Output validation`, {
+    // The furnishing check uses Gemini (text only). Without a Gemini key it is skipped
+    // and logged, rather than throwing away a good redesign.
+    if (!hasGemini) {
+      console.warn(`[${requestId}] Output validation skipped`, {
         roomType: resolvedRoomType || "unspecified",
-        passed: furnishing.passed,
-        reason: furnishing.reason,
-        looksLike: inspection.looksLike || null,
-        furnitureCount: inspection.furniture.length,
+        reason: "GEMINI_API_KEY is not set, so the furnishing check did not run.",
       })
-      if (!furnishing.passed) {
+    } else {
+      try {
+        const mimeType = generatedImageBuffer[0] === 0xff ? "image/jpeg" : "image/png"
+        const inspection = await inspectGeneratedRoom({
+          imageBase64: generatedImageBuffer.toString("base64"),
+          mimeType,
+          roomType: resolvedRoomType,
+          requestId,
+        })
+        const furnishing = assessRoomOutput(inspection, resolvedRoomType)
+        console.log(`[${requestId}] Output validation`, {
+          roomType: resolvedRoomType || "unspecified",
+          passed: furnishing.passed,
+          reason: furnishing.reason,
+          looksLike: inspection.looksLike || null,
+          furnitureCount: inspection.furniture.length,
+        })
+        if (!furnishing.passed) {
+          return NextResponse.json({
+            success: false,
+            errorMessage: furnishing.reason,
+            errorCode: furnishing.reason.toLowerCase().includes("empty") ? "EMPTY_ROOM" : "WRONG_ROOM_TYPE",
+            retryable: true,
+            requestId,
+            stage: "furnishing-check",
+          })
+        }
+      } catch (inspectionError: unknown) {
+        const message = inspectionError instanceof Error
+          ? inspectionError.message
+          : "The furnishing check failed."
+        console.error(`[${requestId}] Output validation`, {
+          roomType: resolvedRoomType || "unspecified",
+          passed: false,
+          reason: sanitizeProviderError(message),
+        })
         return NextResponse.json({
           success: false,
-          errorMessage: furnishing.reason,
-          errorCode: furnishing.reason.toLowerCase().includes("empty") ? "EMPTY_ROOM" : "WRONG_ROOM_TYPE",
+          errorMessage: "The redesign could not be checked for furniture, so it was not saved. Please try again.",
+          errorCode: "FURNISHING_CHECK_FAILED",
           retryable: true,
           requestId,
           stage: "furnishing-check",
         })
       }
-    } catch (inspectionError: unknown) {
-      const message = inspectionError instanceof Error
-        ? inspectionError.message
-        : "The furnishing check failed."
-      console.error(`[${requestId}] Output validation`, {
-        roomType: resolvedRoomType || "unspecified",
-        passed: false,
-        reason: sanitizeProviderError(message),
-      })
-      return NextResponse.json({
-        success: false,
-        errorMessage: "The redesign could not be checked for furniture, so it was not saved. Please try again.",
-        errorCode: "FURNISHING_CHECK_FAILED",
-        retryable: true,
-        requestId,
-        stage: "furnishing-check",
-      })
     }
 
     // Upload image to Vercel Blob only after the result is a real, changed, furnished image.
@@ -1645,6 +1270,8 @@ export async function POST(request: Request) {
           imageUrl: generatedImageUrl,
           style,
           budgetRange: "any",
+          provider: actualProviderUsed,
+          model: actualModel,
           createdAt: new Date().toISOString(),
         }
         savedDesignId = newDesign.id
@@ -1681,6 +1308,8 @@ export async function POST(request: Request) {
     // Log success
     console.log(`[${requestId}] Generation successful`, {
       provider: actualProviderUsed,
+      model: actualModel,
+      estimatedCostUsd: estimatedCostUsd === null ? "unknown" : Number(estimatedCostUsd.toFixed(4)),
       fallbackUsed,
       designId: savedDesignId,
     })
@@ -1691,6 +1320,7 @@ export async function POST(request: Request) {
       imageUrl: generatedImageUrl, // Also include as imageUrl for convenience
       designId: savedDesignId, // Include the saved design ID if available
       providerUsed: actualProviderUsed,
+      model: actualModel,
       fallbackUsed,
       requestId,
     })

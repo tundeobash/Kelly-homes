@@ -222,22 +222,25 @@ describe("mock behavior", () => {
     }
   })
 
-  it("keeps OpenAI as a separate provider only when Stability is absent", () => {
-    const openaiOnly = decideImageProvider({
-      forceMock: false,
-      hasStability: false,
-      hasGemini: true,
-      hasOpenAI: true,
-    })
-    const stability = decideImageProvider({
-      forceMock: false,
-      hasStability: true,
-      hasGemini: true,
-      hasOpenAI: true,
-    })
+  it("uses OpenAI by default and Stability only when asked for or when OpenAI is absent", () => {
+    const all = { forceMock: false, hasStability: true, hasGemini: true, hasOpenAI: true }
 
-    assert.deepEqual(openaiOnly, { ok: true, provider: "openai", planner: "none" })
-    assert.deepEqual(stability, { ok: true, provider: "stability", planner: "gemini" })
+    assert.deepEqual(decideImageProvider(all), { ok: true, provider: "openai", planner: "none" })
+    assert.deepEqual(decideImageProvider({ ...all, preferred: "stability" }), {
+      ok: true,
+      provider: "stability",
+      planner: "gemini",
+    })
+    assert.deepEqual(decideImageProvider({ ...all, hasOpenAI: false }), {
+      ok: true,
+      provider: "stability",
+      planner: "gemini",
+    })
+    assert.deepEqual(decideImageProvider({ ...all, hasStability: false, preferred: "stability" }), {
+      ok: true,
+      provider: "openai",
+      planner: "none",
+    })
   })
 })
 

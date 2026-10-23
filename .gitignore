@@ -44,3 +44,6 @@ next-env.d.ts
 public/uploads/*
 
 .env*
+
+# Local method-comparison photos and results (scripts live on experiment/bakeoff)
+/bakeoff/

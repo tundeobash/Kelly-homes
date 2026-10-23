@@ -532,7 +532,7 @@ export default function AiStudioClient() {
                 htmlFor="moreFurniture"
                 className="text-sm font-normal cursor-pointer"
               >
-                More furniture (enforces 6+ items, expanded mask, higher intensity)
+                More furniture (at least six pieces)
               </Label>
             </div>
 
