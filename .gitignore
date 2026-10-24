@@ -47,3 +47,6 @@ public/uploads/*
 
 # Local method-comparison photos and results (scripts live on experiment/bakeoff)
 /bakeoff/
+
+# Debug dumps from early AI experiments (local only)
+/.debug-artifacts/

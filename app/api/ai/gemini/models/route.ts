@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { listModels, getGeminiConfig } from "@/lib/ai/gemini"
 import { randomBytes } from "crypto"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
 
 // Ensure Node.js runtime
 export const runtime = "nodejs"
@@ -22,6 +24,15 @@ export async function GET() {
         },
       },
       { status: 503 }
+    )
+  }
+
+  // Diagnostic endpoint: signed-in users only (it calls the paid Gemini API).
+  const session = await getServerSession(authOptions)
+  if (!session?.user) {
+    return NextResponse.json(
+      { ok: false, error: { name: "Unauthorized", message: "Sign in to use this endpoint." } },
+      { status: 401 }
     )
   }
 

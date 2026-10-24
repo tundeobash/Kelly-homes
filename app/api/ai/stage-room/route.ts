@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { getUserContext } from "@/lib/auth/getUserContext"
+import { finishDesignAttempt, reserveDesignAttempt } from "@/lib/ai/designLimit"
+import { attemptCounts } from "@/lib/ai/designLimitPolicy"
 import { prisma } from "@/lib/prisma"
 import { randomBytes } from "crypto"
 import { writeFile, mkdir, stat, unlink } from "fs/promises"
@@ -558,7 +560,11 @@ Consistent lighting direction and color temperature. Preserve global perspective
 
 export async function POST(request: Request) {
   const requestId = generateRequestId()
-  
+  // Daily design limit bookkeeping (lib/ai/designLimit.ts)
+  let designAttemptId: string | null = null
+  let designReachedProvider = false
+  let providerHttpStatus: number | null = null
+
   try {
     // Get user context
     const userContext = await getUserContext()
@@ -847,6 +853,24 @@ export async function POST(request: Request) {
     const selectedProvider = providerDecision.provider
     const plannerUsed = providerDecision.planner
 
+    // Daily design limit: record this attempt before any paid work starts.
+    const allowance = await reserveDesignAttempt({ userId, provider: selectedProvider, requestId })
+    if (!allowance.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          errorMessage: allowance.message,
+          errorCode: allowance.errorCode,
+          retryable: allowance.errorCode === "LIMIT_CHECK_FAILED",
+          requestId,
+          limit: allowance.limit,
+          retryAt: "retryAt" in allowance ? allowance.retryAt : null,
+        },
+        { status: 200 }
+      )
+    }
+    designAttemptId = allowance.attemptId
+
     // Read image from disk for processing
     let imageBuffer: Buffer
     let inputHash: string
@@ -922,7 +946,9 @@ export async function POST(request: Request) {
     let actualPlannerUsed: "gemini" | "none" = plannerUsed
     let actualModel: string = selectedProvider === "openai" ? "openai" : "stability-two-pass"
     let estimatedCostUsd: number | null = null
-    
+
+    // From here on the image service may charge, so this attempt counts toward the daily limit.
+    designReachedProvider = true
     try {
       if (selectedProvider === "stability") {
         // Try Gemini planner + Stability renderer
@@ -1095,6 +1121,7 @@ export async function POST(request: Request) {
         error instanceof StabilityGenerationError || error instanceof OpenAIGenerationError ? error : null
       const stage = providerError ? providerError.stage : "generation"
       const status = providerError ? providerError.status ?? null : null
+      providerHttpStatus = status
       const message = error instanceof Error ? error.message : "Unknown error"
       const safeMessage = sanitizeProviderError(message)
       console.error(`[${requestId}] Generation failed`, {
@@ -1343,5 +1370,10 @@ export async function POST(request: Request) {
         stage: "request",
       }
     )
+  } finally {
+    if (designAttemptId) {
+      const counts = attemptCounts({ reachedProvider: designReachedProvider, providerHttpStatus })
+      await finishDesignAttempt(designAttemptId, counts ? "completed" : "failed", requestId)
+    }
   }
 }

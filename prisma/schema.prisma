@@ -201,3 +201,15 @@ model OrderItem {
   @@index([orderId])
 }
 
+// One row per AI design attempt. Used to enforce the per-user daily design limit.
+// status: "started" (running), "completed" (reached the image service, counts),
+// "failed" (never reached it, or it answered with an error: not charged, does not count).
+model DesignGeneration {
+  id        String   @id @default(cuid())
+  userId    String
+  status    String   @default("started")
+  provider  String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
