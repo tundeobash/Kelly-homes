@@ -8,6 +8,8 @@ export interface AiDesignImage {
   style?: string
   budgetRange?: string
   createdAt?: string
+  /** The room photo the design was made from (saved from 26 Oct 2026). */
+  sourceImageUrl?: string | null
 }
 
 export interface NormalizedProject {
@@ -65,6 +67,7 @@ export function normalizeProject(project: any): NormalizedProject {
       style: d.style,
       budgetRange: d.budgetRange,
       createdAt: d.createdAt,
+      sourceImageUrl: typeof d.sourceImageUrl === "string" ? d.sourceImageUrl : null,
     }))
     .filter((d: AiDesignImage) => {
       // Must have id and imageUrl

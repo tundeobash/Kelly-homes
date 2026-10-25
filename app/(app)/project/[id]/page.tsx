@@ -2,17 +2,15 @@ import { redirect } from "next/navigation"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { generateRecommendation } from "@/lib/recommendation-engine"
 import { normalizeProject } from "@/lib/api/normalize-project"
-import ProjectViewClient from "@/components/ProjectViewClient"
+import DesignStudio from "@/components/design/DesignStudio"
 
 type PageProps = {
   params: Promise<{ id: string }>
 }
 
-export default async function ProjectPage({
-  params,
-}: PageProps) {
+/** A room's page is its design screen. */
+export default async function ProjectPage({ params }: PageProps) {
   const { id } = await params
   const session = await getServerSession(authOptions)
 
@@ -20,67 +18,29 @@ export default async function ProjectPage({
     redirect("/auth")
   }
 
-  const project = await prisma.roomProject.findUnique({
-    where: { id },
-    include: {
-      user: true,
-      recommendations: {
-        include: {
-          items: {
-            include: {
-              furnitureItem: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  })
+  const project = await prisma.roomProject.findUnique({ where: { id } })
 
   if (!project || project.userId !== session.user.id) {
     redirect("/profile/me")
   }
 
-  // Normalize project to get designs array (same as API does)
-  const normalizedProject = normalizeProject(project)
-  
-  // Use safe accessor for designs (normalizeProject returns aiDesigns)
-  const designs = normalizedProject.aiDesigns ?? []
-  
-  if (process.env.NODE_ENV === "development") {
-    console.log("[PROJECT DETAIL] Project ID:", normalizedProject.id)
-    console.log("[PROJECT DETAIL] Image URL:", normalizedProject.imageUrl?.substring(0, 50))
-    console.log("[PROJECT DETAIL] Designs count:", designs.length)
-    console.log("[PROJECT DETAIL] First design URL:", designs[0]?.imageUrl?.substring(0, 50))
-  }
-
-  // Get user preferences
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-  })
-
-  // Get designers for the designer selector
-  const designers = await prisma.designer.findMany({
-    orderBy: { name: "asc" },
-  })
-  
-  // Merge normalized data with recommendations and user
-  const projectWithDesigns = {
-    ...normalizedProject,
-    length: project.length,
-    width: project.width,
-    height: project.height,
-    recommendations: project.recommendations,
-    user: project.user,
-  }
+  const normalized = normalizeProject(project)
 
   return (
-    <ProjectViewClient
-      project={projectWithDesigns}
-      userPreferences={user?.preferredStyles || []}
-      userBudget={user?.budgetMax}
-      designers={designers}
+    <DesignStudio
+      project={{
+        id: normalized.id,
+        name: normalized.name,
+        roomType: normalized.roomType || "",
+        imageUrl: normalized.imageUrl || null,
+        designs: normalized.aiDesigns.map((design) => ({
+          id: design.id,
+          imageUrl: design.imageUrl,
+          style: design.style || "",
+          createdAt: design.createdAt ?? null,
+          sourceImageUrl: design.sourceImageUrl ?? null,
+        })),
+      }}
     />
   )
 }
-

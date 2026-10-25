@@ -1295,6 +1295,8 @@ export async function POST(request: Request) {
         const newDesign = {
           id: `design_${Date.now()}_${randomBytes(4).toString("hex")}`,
           imageUrl: generatedImageUrl,
+          // The photo this design was made from, so before/after stays right if the room photo changes
+          sourceImageUrl: imageUrl,
           style,
           budgetRange: "any",
           provider: actualProviderUsed,

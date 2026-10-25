@@ -39,6 +39,14 @@ export class OpenAIGenerationError extends Error {
 export const FIXTURE_RULE =
   "Keep every fitted part of the home unchanged: kitchen cabinets, counters, counter fronts and splashbacks, built-in wardrobes, doors and door frames, windows and window frames, air-conditioning vents, light switches, sockets, and safety equipment such as fire extinguishers."
 
+/** Furniture must never block a way in or out of the room. */
+export const CLEARANCE_RULE =
+  "Keep doorways, the balcony door and walkways clear: place no furniture in front of a door, doorway or balcony door, and leave a clear path to each of them."
+
+/** One ceiling light where the room already has one, not a second beside it. */
+export const CEILING_LIGHT_RULE =
+  "If the ceiling already has a light fitting, replace it at the same point with one that suits the style. Do not add a second ceiling light."
+
 export function buildOpenAIEditInstruction(params: {
   roomType?: string | null
   style: StyleCard
@@ -56,6 +64,8 @@ export function buildOpenAIEditInstruction(params: {
     "Keep the room exactly as it is: the same walls, windows, doors and doorways, ceiling, floor and mouldings, the same camera position and lens, and the same daylight.",
     "Do not add, remove, move or resize any window, door, doorway or wall.",
     FIXTURE_RULE,
+    CLEARANCE_RULE,
+    CEILING_LIGHT_RULE,
     "Only add furniture, rugs, curtains, lamps, light fittings and decor.",
     known ? `Layout: ${guide.layout}` : "",
     params.moreFurniture ? "Furnish generously: include at least six pieces of furniture and decor." : "",

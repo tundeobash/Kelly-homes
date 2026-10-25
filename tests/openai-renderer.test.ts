@@ -4,6 +4,8 @@ import { decideImageProvider } from "../lib/ai/generationPolicy"
 import {
   buildOpenAIEditForm,
   buildOpenAIEditInstruction,
+  CEILING_LIGHT_RULE,
+  CLEARANCE_RULE,
   DEFAULT_OPENAI_IMAGE_MODEL,
   FIXTURE_RULE,
   formatOpenAIHttpError,
@@ -90,6 +92,14 @@ describe("OpenAI design instruction", () => {
     assert.ok(text.includes(style.decor))
     assert.ok(text.includes(`Avoid: ${style.avoid}`))
     assert.match(text, /^Layout: /m)
+  })
+
+  it("keeps doorways and walkways clear and replaces the ceiling light instead of adding one", () => {
+    const text = buildOpenAIEditInstruction({ roomType: "living room", style: card("contemporary-majlis") })
+    assert.ok(text.includes(CLEARANCE_RULE))
+    assert.ok(text.includes(CEILING_LIGHT_RULE))
+    assert.match(text, /balcony door/)
+    assert.match(text, /Do not add a second ceiling light/)
   })
 
   it("leaves out the layout line when the room type is unknown", () => {

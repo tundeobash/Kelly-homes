@@ -56,6 +56,16 @@ const config = {
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",
         error: "hsl(var(--error))",
+        // Warm Minimal palette (handover brief), used by the design screen
+        ks: {
+          charcoal: "#1F2933",
+          gold: "#C9A96A",
+          sand: "#EFE7D8",
+          paper: "#FAFAF8",
+          ink: "#111827",
+          stone: "#6B7280",
+          line: "#E5E7EB",
+        },
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],

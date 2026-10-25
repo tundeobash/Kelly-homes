@@ -111,3 +111,15 @@
   }
 }
 
+/* Design screen: the gold line that sweeps over the photo while a design is made */
+@keyframes ks-scan {
+  0%, 100% { top: 14%; }
+  50% { top: 84%; }
+}
+.ks-scan {
+  top: 46%;
+  animation: ks-scan 3.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-scan { animation: none; }
+}

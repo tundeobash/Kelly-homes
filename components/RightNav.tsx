@@ -20,7 +20,7 @@ export default function RightNav() {
   const pathname = usePathname()
 
   return (
-    <nav className="flex items-center gap-2">
+    <nav className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-2 [&::-webkit-scrollbar]:hidden">
       {navItems.map((item) => {
         const Icon = item.icon
         let isActive = false
@@ -32,19 +32,19 @@ export default function RightNav() {
           isActive = pathname === item.href || pathname?.startsWith(item.href + "/")
         }
         return (
-          <Link key={item.href} href={item.href}>
+          <Link key={item.href} href={item.href} aria-label={item.label} className="flex-shrink-0">
             <Button
               variant={isActive ? "default" : "ghost"}
               size="sm"
-              className="gap-2"
+              className="gap-2 px-2.5 sm:px-3"
             >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden text-sm sm:inline">{item.label}</span>
             </Button>
           </Link>
         )
       })}
-      <SignOutButton variant="ghost" size="sm" className="gap-2">
+      <SignOutButton variant="ghost" size="sm" className="flex-shrink-0 gap-2">
         Sign Out
       </SignOutButton>
     </nav>
