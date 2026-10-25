@@ -85,6 +85,14 @@ export function describeFailure(reply: StageRoomReply | null | undefined, styleN
         message: "Your session has ended. Sign in, then try this style again.",
         requestId,
       }
+    case "LIMIT_CHECK_FAILED":
+      return {
+        kind: "failed",
+        title: "This design did not start",
+        message: "Something went wrong on our side before your design began. Please try again in a minute. Nothing was saved.",
+        detail: reply.errorMessage || undefined,
+        requestId,
+      }
     case "MISSING_IMAGE":
       return {
         kind: "no-photo",
@@ -96,7 +104,7 @@ export function describeFailure(reply: StageRoomReply | null | undefined, styleN
       return {
         kind: "failed",
         title: "This design did not work",
-        message: `We could not make a good ${styleName} design from this photo, so nothing was saved. Try again, or choose a different style.`,
+        message: `This ${styleName} design did not come out right, so nothing was saved. Try again, or choose a different style.`,
         detail: reply.errorMessage || undefined,
         requestId,
       }

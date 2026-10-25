@@ -128,10 +128,21 @@ describe("design replies", () => {
       "Modern Arabic"
     )
     assert.equal(failure.kind, "failed")
-    assert.match(failure.message, /Modern Arabic design/)
+    assert.match(failure.message, /This Modern Arabic design did not come out right/)
     assert.match(failure.message, /nothing was saved/)
     assert.equal(failure.detail, "Not a living room")
     assert.equal(failure.requestId, "req_9")
+  })
+
+  it("does not blame the photo when the design never started", () => {
+    const failure = describeFailure(
+      { success: false, errorCode: "LIMIT_CHECK_FAILED", errorMessage: "We couldn't check your daily design allowance just now." },
+      "Japandi"
+    )
+    assert.equal(failure.kind, "failed")
+    assert.equal(failure.title, "This design did not start")
+    assert.doesNotMatch(failure.message, /photo/)
+    assert.match(failure.message, /Nothing was saved/)
   })
 
   it("asks people to sign in again, or to check their connection", () => {

@@ -72,7 +72,13 @@ export async function reserveDesignAttempt(input: {
     console.error(`[${input.requestId}] Design limit check failed`, {
       error: error instanceof Error ? error.message : String(error),
     })
-    return { allowed: false, errorCode: "LIMIT_CHECK_FAILED", message: LIMIT_CHECK_FAILED_MESSAGE, limit }
+    // On a laptop, show why, so a broken check can be fixed without digging through the server log.
+    const reason = error instanceof Error ? error.message : String(error)
+    const message =
+      process.env.NODE_ENV === "development"
+        ? `${LIMIT_CHECK_FAILED_MESSAGE} (Development only: ${reason.slice(0, 300)})`
+        : LIMIT_CHECK_FAILED_MESSAGE
+    return { allowed: false, errorCode: "LIMIT_CHECK_FAILED", message, limit }
   }
 }
 
