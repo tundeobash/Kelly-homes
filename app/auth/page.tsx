@@ -5,12 +5,17 @@ import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Loader2 } from "lucide-react"
-import { INVITE_EMAIL, inviteMailto, passwordResetMailto } from "@/lib/landing"
+import { contactLinks } from "@/lib/landing"
+import { cleanInviteCode } from "@/lib/invite"
 
 const fieldClass =
   "mt-2 h-[50px] w-full rounded-xl border border-[#D1D5DB] bg-white px-3.5 text-[16px] text-ks-ink outline-none focus:border-ks-charcoal"
 
-/** Sign in and sign up (by invitation). ?mode=signup opens sign-up. */
+/**
+ * Sign in and sign up (by invitation). ?mode=signup opens sign-up.
+ * ?invite=CODE comes from the WhatsApp invite link; it is kept for this visit
+ * so it still works after switching between sign in and sign up.
+ */
 export default function AuthPage() {
   const router = useRouter()
   const [isLogin, setIsLogin] = useState(true)
@@ -19,11 +24,20 @@ export default function AuthPage() {
   const [name, setName] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const invite = inviteMailto(INVITE_EMAIL)
-  const reset = passwordResetMailto(INVITE_EMAIL)
+  const [inviteCode, setInviteCode] = useState<string | null>(null)
+  const { invite, passwordReset: reset } = contactLinks()
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("mode") === "signup") setIsLogin(false)
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("mode") === "signup") setIsLogin(false)
+    let code = cleanInviteCode(params.get("invite"))
+    try {
+      if (code) window.sessionStorage.setItem("ks-invite", code)
+      else code = cleanInviteCode(window.sessionStorage.getItem("ks-invite"))
+    } catch {
+      // Storage can be blocked; the code from the link still works.
+    }
+    setInviteCode(code)
   }, [])
 
   const switchMode = () => {
@@ -47,7 +61,7 @@ export default function AuthPage() {
         const res = await fetch("/api/auth/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password, name }),
+          body: JSON.stringify({ email, password, name, invite: inviteCode || undefined }),
         })
         if (!res.ok) {
           const data = await res.json().catch(() => ({}))
@@ -81,7 +95,9 @@ export default function AuthPage() {
         <p className="mt-1.5 text-[15px] leading-normal text-ks-stone">
           {isLogin
             ? "Sign in to see your rooms."
-            : "Kelly Spaces is in private preview. Use the email address your invitation was sent to."}
+            : inviteCode
+              ? "You're invited to the Kelly Spaces private preview. Create your account to start."
+              : "Kelly Spaces is in private preview. Sign up with the invite link you were sent."}
         </p>
 
         {!isLogin && (
@@ -167,7 +183,7 @@ export default function AuthPage() {
           {isLogin ? "Sign up with your invitation" : "Sign in"}
         </button>
       </p>
-      {invite && (
+      {invite && !inviteCode && (
         <p className="mt-2 text-center text-[14px] text-ks-stone">
           No invitation yet?{" "}
           <a href={invite} className="text-[14px] font-medium text-ks-charcoal underline underline-offset-4">

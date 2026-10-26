@@ -213,3 +213,15 @@ model DesignGeneration {
 
   @@index([userId, createdAt])
 }
+
+/// Tester actions in the private preview (lib/tracking.ts). Written with raw SQL by /api/events.
+model ProductEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  projectId String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([name, createdAt])
+}

@@ -6,7 +6,7 @@ import { isSignupAllowed, isValidEmail, normalizeEmail, SIGNUPS_CLOSED_MESSAGE }
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { email, password, name } = body
+    const { email, password, name, invite } = body
 
     if (!email || !password || typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json(
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Please enter a valid email address" }, { status: 400 })
     }
 
-    if (!isSignupAllowed(normalizedEmail)) {
+    if (!isSignupAllowed(normalizedEmail, process.env, typeof invite === "string" ? invite : null)) {
       return NextResponse.json({ error: SIGNUPS_CLOSED_MESSAGE }, { status: 403 })
     }
 

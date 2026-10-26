@@ -21,6 +21,7 @@ import {
 } from "@/lib/design/studioFlow"
 import type { StageRoomReply, StudioDesign, StudioFailure } from "@/lib/design/studioFlow"
 import { STUDIO_STYLES, findStudioStyle, styleDisplayName } from "@/lib/design/studioStyles"
+import { track } from "@/lib/tracking"
 
 export interface DesignStudioProject {
   id: string
@@ -159,6 +160,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   }
 
   const openCompare = () => {
+    track("compare_opened", project.id)
     setPair(defaultComparePair(designs, current?.id ?? null))
     go("compare")
   }
@@ -234,11 +236,16 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           total={designs.length}
           usedStyles={designs.map((d) => d.style)}
           onTryAnother={() => {
+            track("try_another_style", project.id)
             setPicked(firstUnusedStyle(designs))
             go("choose")
           }}
           onCompare={openCompare}
-          onTryStyle={generate}
+          onTryStyle={(styleId) => {
+            track("try_another_style", project.id)
+            generate(styleId)
+          }}
+          onSliderMoved={() => track("slider_used", project.id)}
         />
       )}
 
@@ -250,8 +257,12 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           pair={pair}
           onPick={(id) => setPair((p) => pickForCompare(p, id))}
           onSwap={() => setPair((p) => [p[1], p[0]])}
-          onOpen={setLightbox}
+          onOpen={(item) => {
+            track("fullscreen_opened", project.id)
+            setLightbox(item)
+          }}
           onNewStyle={() => {
+            track("try_another_style", project.id)
             setPicked(firstUnusedStyle(designs))
             go("choose")
           }}

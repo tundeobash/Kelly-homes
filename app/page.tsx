@@ -2,7 +2,8 @@ import Link from "next/link"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import BeforeAfterSlider from "@/components/design/BeforeAfterSlider"
-import { HERO_PAIR, INVITE_EMAIL, LANDING_STYLES, SHOWCASE_ROOMS, inviteMailto } from "@/lib/landing"
+import { HERO_PAIR, LANDING_STYLES, SHOWCASE_ROOMS, contactLinks } from "@/lib/landing"
+import { cleanInviteCode } from "@/lib/invite"
 
 const serif = "font-serif font-semibold text-ks-ink"
 const primaryButton =
@@ -23,12 +24,23 @@ const steps = [
   },
 ]
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const session = await getServerSession(authOptions)
   const signedIn = Boolean(session?.user?.id)
+  // ?invite=CODE comes from the WhatsApp invite link and is passed on to sign-up.
+  const params = await searchParams
+  const inviteCode = cleanInviteCode(typeof params.invite === "string" ? params.invite : null)
+  const inviteQuery = inviteCode ? `invite=${encodeURIComponent(inviteCode)}` : ""
   // Signed in: straight to their newest room. Signed out: sign up (by invitation).
-  const startHref = signedIn ? "/ai-studio" : "/auth?mode=signup"
-  const invite = inviteMailto(INVITE_EMAIL)
+  const startHref = signedIn ? "/ai-studio" : `/auth?mode=signup${inviteQuery ? `&${inviteQuery}` : ""}`
+  const signInHref = signedIn ? "/ai-studio" : `/auth${inviteQuery ? `?${inviteQuery}` : ""}`
+  // People who came with an invite link don't need to ask for one.
+  const invite = inviteCode ? null : contactLinks().invite
+  const previewNote = inviteCode ? "Private preview. You're invited." : "Private preview, by invitation."
 
   return (
     <div className="min-h-screen bg-ks-paper font-sans text-ks-ink">
@@ -38,7 +50,7 @@ export default async function Home() {
         </Link>
         <nav className="flex items-center gap-5">
           <Link
-            href={signedIn ? "/ai-studio" : "/auth"}
+            href={signInHref}
             className="px-1 py-3 text-[15px] font-medium text-ks-charcoal hover:underline"
           >
             {signedIn ? "Your rooms" : "Sign in"}
@@ -67,7 +79,7 @@ export default async function Home() {
                 Design your room
               </Link>
               <p className="text-[14px] text-ks-stone">
-                Private preview, by invitation.
+                {previewNote}
                 {invite && (
                   <>
                     {" "}
@@ -99,7 +111,7 @@ export default async function Home() {
               Design your room
             </Link>
             <p className="mt-2.5 text-center text-[13px] text-ks-stone">
-              Private preview, by invitation.
+              {previewNote}
               {invite && (
                 <>
                   {" "}
@@ -195,7 +207,9 @@ export default async function Home() {
                 Try a style before you buy a thing.
               </h2>
               <p className="mt-3 text-[15px] leading-relaxed text-[#D1D5DB] sm:text-[16px]">
-                Kelly Spaces is in private preview. Sign up with the email address your invitation was sent to.
+                {inviteCode
+                  ? "Kelly Spaces is in private preview, and you're invited. Create your account to start."
+                  : "Kelly Spaces is in private preview. Sign up with the invite link you were sent."}
                 {invite && (
                   <>
                     {" "}

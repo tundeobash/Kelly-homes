@@ -1,6 +1,7 @@
 "use client"
 
 import BeforeAfterSlider from "@/components/design/BeforeAfterSlider"
+import { contactLinks } from "@/lib/landing"
 import { STUDIO_STYLES, findStudioStyle } from "@/lib/design/studioStyles"
 import type { StudioDesign } from "@/lib/design/studioFlow"
 
@@ -14,6 +15,7 @@ interface ResultViewProps {
   onTryAnother: () => void
   onCompare: () => void
   onTryStyle: (styleId: string) => void
+  onSliderMoved?: () => void
 }
 
 export default function ResultView({
@@ -26,7 +28,9 @@ export default function ResultView({
   onTryAnother,
   onCompare,
   onTryStyle,
+  onSliderMoved,
 }: ResultViewProps) {
+  const feedback = contactLinks().feedback
   const used = new Set(usedStyles.map((style) => findStudioStyle(style)?.id ?? style))
   const nextStyles = STUDIO_STYLES.filter((style) => !used.has(style.id)).slice(0, 6)
 
@@ -37,6 +41,7 @@ export default function ResultView({
         beforeSrc={beforeSrc}
         afterSrc={design.imageUrl}
         afterAlt={`After: ${styleName} design of your room`}
+        onFirstMove={onSliderMoved}
       />
 
       <div className="pb-28 lg:pb-0">
@@ -49,6 +54,19 @@ export default function ResultView({
         <p className="mt-1.5 text-[13px] leading-normal text-ks-stone">
           Walls, windows and doors come from your photo. Furniture and decor are imagined by AI.
         </p>
+        {feedback && (
+          <p className="mt-2 text-[13px] leading-normal text-ks-stone">
+            Something look wrong?{" "}
+            <a
+              href={feedback}
+              target={feedback.startsWith("https:") ? "_blank" : undefined}
+              rel={feedback.startsWith("https:") ? "noopener noreferrer" : undefined}
+              className="text-[13px] font-medium text-ks-charcoal underline underline-offset-4"
+            >
+              Send feedback
+            </a>
+          </p>
+        )}
 
         <div className="fixed inset-x-0 bottom-0 z-10 grid grid-cols-2 gap-3 border-t border-ks-line bg-white px-4 pb-[max(16px,env(safe-area-inset-bottom))] pt-3 lg:static lg:mt-6 lg:border-0 lg:bg-transparent lg:p-0">
           <button

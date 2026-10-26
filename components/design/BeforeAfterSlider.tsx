@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { KeyboardEvent, PointerEvent } from "react"
 import { ChevronsLeftRight } from "lucide-react"
 
@@ -9,6 +9,8 @@ interface BeforeAfterSliderProps {
   beforeAlt?: string
   afterSrc: string
   afterAlt: string
+  /** Called once, the first time the slider is moved. */
+  onFirstMove?: () => void
 }
 
 /**
@@ -20,6 +22,7 @@ export default function BeforeAfterSlider({
   beforeAlt = "Before: your room as photographed",
   afterSrc,
   afterAlt,
+  onFirstMove,
 }: BeforeAfterSliderProps) {
   const [pos, setPos] = useState(50)
   const [touched, setTouched] = useState(false)
@@ -27,6 +30,12 @@ export default function BeforeAfterSlider({
   const [beforeFailed, setBeforeFailed] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
+  const firstMove = useRef(onFirstMove)
+  firstMove.current = onFirstMove
+
+  useEffect(() => {
+    if (touched) firstMove.current?.()
+  }, [touched])
 
   const showBefore = Boolean(beforeSrc) && !beforeFailed
 

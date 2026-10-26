@@ -9,6 +9,8 @@ import { getUserContext, DEV_MODE } from "@/lib/auth/getUserContext"
 import { isDatabaseConnectionError } from "@/lib/db/connection-check"
 import { normalizeProject } from "@/lib/api/normalize-project"
 import { randomBytes } from "crypto"
+import { del } from "@vercel/blob"
+import { filesOnlyThisRoomUses, shouldDeleteFiles } from "@/lib/blobFiles"
 
 // Generate a unique request ID for logging
 function generateRequestId(): string {
@@ -331,10 +333,33 @@ export async function DELETE(
       }
     }
 
+    // Its photo and designs in file storage, unless another of their rooms still shows them.
+    let storedFiles: string[] = []
+    if (shouldDeleteFiles()) {
+      const otherRooms = await prisma.roomProject.findMany({
+        where: { userId: project.userId, id: { not: id } },
+        select: { imageUrl: true, aiDesignsJson: true },
+      })
+      storedFiles = filesOnlyThisRoomUses(project, otherRooms)
+    }
+
     // Delete the project
     await prisma.roomProject.delete({
       where: { id },
     })
+
+    // Best effort: the room is gone either way.
+    if (storedFiles.length > 0) {
+      try {
+        await del(storedFiles)
+      } catch (fileError) {
+        console.error("[API PROJECTS DELETE] Could not delete stored files", {
+          id,
+          count: storedFiles.length,
+          error: fileError instanceof Error ? fileError.message : String(fileError),
+        })
+      }
+    }
 
     if (process.env.NODE_ENV === "development") {
       console.log("[API PROJECTS DELETE] Deleted project:", id)
