@@ -10,8 +10,8 @@ export default function AppLayout({
     <div className="min-h-screen bg-gray-50">
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-3 sm:py-4 flex justify-between items-center gap-3">
-          <Link href="/" className="flex-shrink-0">
-            <h1 className="text-xl sm:text-2xl font-bold">Kelly Homes</h1>
+          <Link href="/" className="flex-shrink-0 font-serif text-[22px] font-semibold text-ks-charcoal sm:text-[24px]">
+            Kelly Spaces
           </Link>
           <RightNav />
         </div>

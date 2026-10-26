@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Chrome, Apple, Facebook } from "lucide-react"
+import { INVITE_EMAIL, inviteMailto } from "@/lib/landing"
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true)
@@ -20,11 +20,12 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
+  const invite = inviteMailto(INVITE_EMAIL)
 
-  const handleSocialLogin = async (provider: string) => {
-    // TODO: Wire to actual providers when configured
-    alert("Coming soon")
-  }
+  // The landing page links here with ?mode=signup
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("mode") === "signup") setIsLogin(false)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -48,7 +49,7 @@ export default function AuthPage() {
           } else {
             localStorage.removeItem("rememberMe")
           }
-          router.push("/profile/me")
+          router.push("/ai-studio")
         }
       } else {
         const res = await fetch("/api/auth/register", {
@@ -69,7 +70,7 @@ export default function AuthPage() {
           })
 
           if (result?.ok) {
-            router.push("/profile/me")
+            router.push("/ai-studio")
           }
         }
       }
@@ -81,61 +82,20 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-ks-paper p-4">
+      <Link href="/" className="font-serif text-[26px] font-semibold text-ks-charcoal">
+        Kelly Spaces
+      </Link>
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>{isLogin ? "Sign In" : "Sign Up"}</CardTitle>
           <CardDescription>
             {isLogin
-              ? "Enter your credentials to access your account"
-              : "Create a new account to get started"}
+              ? "Enter your email and password"
+              : "Kelly Spaces is in private preview. Use the email address your invitation was sent to."}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Social Login Buttons */}
-          <div className="space-y-3 mb-6">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={() => handleSocialLogin("google")}
-            >
-              <Chrome className="mr-2 h-4 w-4" />
-              Continue with Google
-            </Button>
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={() => handleSocialLogin("apple")}
-              >
-                <Apple className="mr-2 h-4 w-4" />
-                Apple
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={() => handleSocialLogin("facebook")}
-              >
-                <Facebook className="mr-2 h-4 w-4" />
-                Facebook
-              </Button>
-            </div>
-          </div>
-
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">
-                Or continue with email
-              </span>
-            </div>
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
               <div className="space-y-2">
@@ -195,7 +155,17 @@ export default function AuthPage() {
               </div>
             )}
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive">
+                {error}
+                {!isLogin && invite && (
+                  <>
+                    {" "}
+                    <a href={invite} className="text-sm font-medium underline underline-offset-4">
+                      Ask for an invite
+                    </a>
+                  </>
+                )}
+              </p>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Loading..." : isLogin ? "Sign In" : "Sign Up"}
@@ -222,7 +192,7 @@ export default function AuthPage() {
           </div>
           <p className="mt-4 text-xs text-center text-muted-foreground">
             By continuing you are agreeing to our{" "}
-            <Link href="/terms" className="underline">
+            <Link href="/terms" className="text-xs underline">
               Terms of Service
             </Link>
           </p>

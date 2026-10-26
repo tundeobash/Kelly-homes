@@ -57,7 +57,7 @@ export default function DesignerProfileClient({
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <Link href="/">
-            <h1 className="text-2xl font-bold">Kelly Homes</h1>
+            <h1 className="text-2xl font-bold">Kelly Spaces</h1>
           </Link>
           <div className="flex gap-4">
             <Link href="/styles">

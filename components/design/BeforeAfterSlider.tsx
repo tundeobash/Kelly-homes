@@ -6,6 +6,7 @@ import { ChevronsLeftRight } from "lucide-react"
 
 interface BeforeAfterSliderProps {
   beforeSrc: string | null
+  beforeAlt?: string
   afterSrc: string
   afterAlt: string
 }
@@ -14,7 +15,12 @@ interface BeforeAfterSliderProps {
  * Before/after on one picture. Drag right to see more of the photo as it is,
  * left to see more of the new design. Arrow keys work too.
  */
-export default function BeforeAfterSlider({ beforeSrc, afterSrc, afterAlt }: BeforeAfterSliderProps) {
+export default function BeforeAfterSlider({
+  beforeSrc,
+  beforeAlt = "Before: your room as photographed",
+  afterSrc,
+  afterAlt,
+}: BeforeAfterSliderProps) {
   const [pos, setPos] = useState(50)
   const [touched, setTouched] = useState(false)
   const [ratio, setRatio] = useState(3 / 4)
@@ -88,7 +94,7 @@ export default function BeforeAfterSlider({ beforeSrc, afterSrc, afterAlt }: Bef
         <>
           <img
             src={beforeSrc}
-            alt="Before: your room as photographed"
+            alt={beforeAlt}
             draggable={false}
             className="absolute inset-0 h-full w-full object-cover"
             style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}
