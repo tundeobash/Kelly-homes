@@ -7,6 +7,7 @@ import Link from "next/link"
 import { Loader2 } from "lucide-react"
 import { contactLinks } from "@/lib/landing"
 import { cleanInviteCode } from "@/lib/invite"
+import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/auth/passwordRules"
 
 const fieldClass =
   "mt-2 h-[50px] w-full rounded-xl border border-[#D1D5DB] bg-white px-3.5 text-[16px] text-ks-ink outline-none focus:border-ks-charcoal"
@@ -25,7 +26,7 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [inviteCode, setInviteCode] = useState<string | null>(null)
-  const { invite, passwordReset: reset } = contactLinks()
+  const { invite } = contactLinks()
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -47,8 +48,15 @@ export default function AuthPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setError("")
+    if (!isLogin) {
+      const problem = passwordProblem(password)
+      if (problem) {
+        setError(problem)
+        return
+      }
+    }
+    setLoading(true)
     try {
       if (isLogin) {
         const result = await signIn("credentials", { email, password, redirect: false })
@@ -141,8 +149,12 @@ export default function AuthPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          minLength={isLogin ? undefined : MIN_PASSWORD_LENGTH}
           className={fieldClass}
         />
+        {!isLogin && (
+          <p className="mt-1.5 text-[13px] leading-normal text-ks-stone">At least {MIN_PASSWORD_LENGTH} characters.</p>
+        )}
 
         {error && (
           <p role="alert" className="mt-4 text-[14px] leading-normal text-[#B42318]">
@@ -167,12 +179,12 @@ export default function AuthPage() {
           {isLogin ? "Sign in" : "Create account"}
         </button>
 
-        {isLogin && reset && (
+        {isLogin && (
           <p className="mt-4 text-center text-[14px] leading-normal text-ks-stone">
             Forgot your password?{" "}
-            <a href={reset} className="text-[14px] font-medium text-ks-charcoal underline underline-offset-4">
-              Ask us to reset it
-            </a>
+            <Link href="/auth/forgot-password" className="text-[14px] font-medium text-ks-charcoal underline underline-offset-4">
+              Reset it
+            </Link>
           </p>
         )}
       </form>

@@ -225,3 +225,16 @@ model ProductEvent {
   @@index([userId, createdAt])
   @@index([name, createdAt])
 }
+
+/// One-time "choose a new password" links (lib/auth/passwordReset.ts). Only a hash of each
+/// link's token is stored. Written with raw SQL by /api/auth/forgot-password and reset-password.
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}

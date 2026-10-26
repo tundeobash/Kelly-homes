@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
 import { isSignupAllowed, isValidEmail, normalizeEmail, SIGNUPS_CLOSED_MESSAGE } from "@/lib/auth/signupPolicy"
+import { passwordProblem } from "@/lib/auth/passwordRules"
 
 export async function POST(request: Request) {
   try {
@@ -18,6 +19,11 @@ export async function POST(request: Request) {
     const normalizedEmail = normalizeEmail(email)
     if (!isValidEmail(normalizedEmail)) {
       return NextResponse.json({ error: "Please enter a valid email address" }, { status: 400 })
+    }
+
+    const problem = passwordProblem(password)
+    if (problem) {
+      return NextResponse.json({ error: problem }, { status: 400 })
     }
 
     if (!isSignupAllowed(normalizedEmail, process.env, typeof invite === "string" ? invite : null)) {
