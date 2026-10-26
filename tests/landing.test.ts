@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { describe, it } from "node:test"
-import { HERO_PAIR, LANDING_STYLES, SHOWCASE_ROOMS, inviteMailto } from "../lib/landing"
+import { HERO_PAIR, INVITE_EMAIL, LANDING_STYLES, SHOWCASE_ROOMS, inviteMailto } from "../lib/landing"
 
 function onDisk(publicPath: string): boolean {
   return existsSync(join(process.cwd(), "public", publicPath))
@@ -34,5 +34,9 @@ describe("landing page", () => {
     assert.equal(inviteMailto(""), null)
     assert.equal(inviteMailto(null), null)
     assert.equal(inviteMailto("not an email"), null)
+  })
+
+  it("has a working invite address set, or none at all", () => {
+    if (INVITE_EMAIL) assert.ok(inviteMailto(INVITE_EMAIL), "INVITE_EMAIL is not a valid address")
   })
 })

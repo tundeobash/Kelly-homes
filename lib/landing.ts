@@ -2,10 +2,11 @@ import { findStudioStyle } from "./design/studioStyles"
 import type { StudioStyle } from "./design/studioStyles"
 
 /**
- * Where "Ask for an invite" emails go. While this is empty the link is hidden;
- * the page still says sign-up is by invitation.
+ * Where "Ask for an invite" emails go (Ayo's choice, 26 Oct 2026; to be replaced
+ * by a Kelly Spaces address later). Set it to "" to hide the link; the page
+ * still says sign-up is by invitation.
  */
-export const INVITE_EMAIL = ""
+export const INVITE_EMAIL = "tundeobash@gmail.com"
 
 export function inviteMailto(email: string | null | undefined): string | null {
   const address = (email || "").trim()
