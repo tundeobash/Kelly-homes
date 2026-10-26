@@ -1,3 +1,4 @@
+import { UNFINISHED_API_BODY, showUnfinished } from "@/lib/unfinished"
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
@@ -8,6 +9,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!showUnfinished()) return NextResponse.json(UNFINISHED_API_BODY, { status: 404 })
   try {
     const { id } = await params
     const session = await getServerSession(authOptions)

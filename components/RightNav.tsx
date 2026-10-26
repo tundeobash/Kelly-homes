@@ -1,52 +1,41 @@
 "use client"
 
-import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import SignOutButton from "@/components/SignOutButton"
-import { Palette, ShoppingBag, Users, ShoppingCart, User, Sparkles, Image as ImageIcon } from "lucide-react"
+import { signOut } from "next-auth/react"
+import { Plus } from "lucide-react"
+import { showUnfinished } from "@/lib/unfinished"
 
-const navItems = [
-  { href: "/profile/me", label: "Profile", icon: User },
-  { href: "/ai-studio", label: "AI Studio", icon: Sparkles },
-  { href: "/galleries", label: "Galleries", icon: ImageIcon },
-  { href: "/styles", label: "Styles", icon: Palette },
-  { href: "/catalog", label: "Catalog", icon: ShoppingBag },
-  { href: "/designers", label: "Designers", icon: Users },
-  { href: "/checkout", label: "Cart", icon: ShoppingCart },
+/** Mock-up sections, shown only when unfinished features are switched on. */
+const unfinishedItems = [
+  { href: "/catalog", label: "Catalog" },
+  { href: "/designers", label: "Designers" },
+  { href: "/checkout", label: "Cart" },
 ]
 
 export default function RightNav() {
-  const pathname = usePathname()
+  const extras = showUnfinished() ? unfinishedItems : []
 
   return (
-    <nav className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-2 [&::-webkit-scrollbar]:hidden">
-      {navItems.map((item) => {
-        const Icon = item.icon
-        let isActive = false
-        if (item.href === "/profile/me") {
-          isActive = pathname?.startsWith("/profile")
-        } else if (item.href === "/checkout") {
-          isActive = pathname === "/checkout" || pathname?.startsWith("/checkout")
-        } else {
-          isActive = pathname === item.href || pathname?.startsWith(item.href + "/")
-        }
-        return (
-          <Link key={item.href} href={item.href} aria-label={item.label} className="flex-shrink-0">
-            <Button
-              variant={isActive ? "default" : "ghost"}
-              size="sm"
-              className="gap-2 px-2.5 sm:px-3"
-            >
-              <Icon className="h-4 w-4" aria-hidden="true" />
-              <span className="hidden text-sm sm:inline">{item.label}</span>
-            </Button>
-          </Link>
-        )
-      })}
-      <SignOutButton variant="ghost" size="sm" className="flex-shrink-0 gap-2">
-        Sign Out
-      </SignOutButton>
+    <nav className="flex min-w-0 items-center gap-1.5 sm:gap-3">
+      {extras.map((item) => (
+        <Link key={item.href} href={item.href} className="hidden px-2 py-3 text-[14px] font-medium text-ks-charcoal hover:underline sm:block">
+          {item.label}
+        </Link>
+      ))}
+      <Link
+        href="/project/new"
+        className="flex h-10 flex-shrink-0 items-center gap-1.5 rounded-[10px] bg-ks-charcoal px-3.5 text-[14px] font-semibold text-white transition-opacity duration-150 hover:opacity-90"
+      >
+        <Plus className="h-4 w-4" strokeWidth={2.2} aria-hidden="true" />
+        New room
+      </Link>
+      <button
+        type="button"
+        onClick={() => signOut({ callbackUrl: "/" })}
+        className="flex h-11 flex-shrink-0 items-center px-2 text-[14px] font-medium text-ks-charcoal hover:underline"
+      >
+        Sign out
+      </button>
     </nav>
   )
 }

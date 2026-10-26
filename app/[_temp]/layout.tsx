@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation"
+import { showUnfinished } from "@/lib/unfinished"
 import { Plus_Jakarta_Sans } from "next/font/google"
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -11,6 +13,8 @@ export default function TempLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Leftover test page, hidden unless unfinished features are switched on
+  if (!showUnfinished()) notFound()
   return (
     <div
       className={`${plusJakartaSans.variable} font-[var(--font-stitch-temp)] bg-[#f6f8f6] dark:bg-[#112116] text-[#0e1b12] dark:text-white transition-colors duration-200 min-h-screen`}

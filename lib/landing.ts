@@ -8,12 +8,23 @@ import type { StudioStyle } from "./design/studioStyles"
  */
 export const INVITE_EMAIL = "tundeobash@gmail.com"
 
-export function inviteMailto(email: string | null | undefined): string | null {
+function mailto(email: string | null | undefined, subject: string, body: string): string | null {
   const address = (email || "").trim()
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return null
-  const subject = encodeURIComponent("Kelly Spaces invite request")
-  const body = encodeURIComponent("Hello, I would like to try Kelly Spaces. Please invite this email address.")
-  return `mailto:${address}?subject=${subject}&body=${body}`
+  return `mailto:${address}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+}
+
+export function inviteMailto(email: string | null | undefined): string | null {
+  return mailto(email, "Kelly Spaces invite request", "Hello, I would like to try Kelly Spaces. Please invite this email address.")
+}
+
+/** There is no reset email yet, so people ask for a reset by email. */
+export function passwordResetMailto(email: string | null | undefined): string | null {
+  return mailto(
+    email,
+    "Kelly Spaces password reset",
+    "Hello, please reset the password for my Kelly Spaces account. I signed up with this email address."
+  )
 }
 
 /** Real phone photos of an empty Gulf apartment and their designs, from the 24 Oct 2026 test. */
