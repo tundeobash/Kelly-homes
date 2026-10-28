@@ -20,6 +20,13 @@ import {
 } from "@/lib/ai/roomFurnishing"
 import { renderWithStability, StabilityGenerationError, sanitizeProviderError } from "@/lib/ai/stabilityRenderer"
 import { buildOpenAIEditInstruction, OpenAIGenerationError, renderWithOpenAI } from "@/lib/ai/openaiRenderer"
+import {
+  checkMustIncludes,
+  cleanMustInclude,
+  findMustInclude,
+  piecesToCheck,
+  uncheckedMustIncludes,
+} from "@/lib/design/mustInclude"
 import { runTwoPassStability } from "@/lib/ai/twoPassGeneration"
 import { decideImageProvider, stageLabel } from "@/lib/ai/generationPolicy"
 import { InvalidImageError, UnchangedImageError, validateGeneratedImage, sha256 } from "@/lib/ai/generationValidation"
@@ -603,6 +610,8 @@ export async function POST(request: Request) {
     }
 
     const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture, roomType: requestedRoomType } = body
+    // Must-have pieces the person picked (at most 3, known ids only).
+    const pickedMustInclude = cleanMustInclude(body?.mustInclude)
 
     // Resolve the style card (every style in the app has one)
     const styleKey = (typeof style === "string" ? style : "").toLowerCase()
@@ -782,6 +791,8 @@ export async function POST(request: Request) {
       requested: typeof requestedRoomType === "string" ? requestedRoomType : "",
       saved: project?.roomType,
     })
+    // What to ask for and check: the picks, plus a dining table for a living and dining room.
+    const mustIncludeIds = piecesToCheck(pickedMustInclude, resolvedRoomType)
 
     console.log(`[${requestId}] Room type received`, {
       fromRequest: typeof requestedRoomType === "string" && requestedRoomType.trim()
@@ -1098,10 +1109,12 @@ export async function POST(request: Request) {
           style: styleCard,
           userPrompt,
           moreFurniture: moreFurniture === true,
+          mustInclude: mustIncludeIds,
         })
         console.log(`[${requestId}] OpenAI redesign`, {
           roomType: resolvedRoomType || "unspecified",
           style: styleCard.id,
+          mustInclude: mustIncludeIds,
           instructionLength: instruction.length,
         })
         const rendered = await renderWithOpenAI({
@@ -1195,6 +1208,9 @@ export async function POST(request: Request) {
       })
     }
 
+    // Whether each must-have piece made it into the design (null when the check does not run).
+    let mustIncludeResults = uncheckedMustIncludes(mustIncludeIds)
+
     // The furnishing check uses Gemini (text only). Without a Gemini key it is skipped
     // and logged, rather than throwing away a good redesign.
     if (!hasGemini) {
@@ -1209,15 +1225,18 @@ export async function POST(request: Request) {
           imageBase64: generatedImageBuffer.toString("base64"),
           mimeType,
           roomType: resolvedRoomType,
+          mustHaves: mustIncludeIds.map((id) => findMustInclude(id)?.label || id),
           requestId,
         })
         const furnishing = assessRoomOutput(inspection, resolvedRoomType)
+        mustIncludeResults = checkMustIncludes(inspection, mustIncludeIds)
         console.log(`[${requestId}] Output validation`, {
           roomType: resolvedRoomType || "unspecified",
           passed: furnishing.passed,
           reason: furnishing.reason,
           looksLike: inspection.looksLike || null,
           furnitureCount: inspection.furniture.length,
+          mustInclude: mustIncludeResults.map((r) => `${r.id}:${r.included}`),
         })
         if (!furnishing.passed) {
           return NextResponse.json({
@@ -1302,6 +1321,7 @@ export async function POST(request: Request) {
           provider: actualProviderUsed,
           model: actualModel,
           createdAt: new Date().toISOString(),
+          ...(mustIncludeResults.length > 0 ? { mustInclude: mustIncludeResults } : {}),
         }
         savedDesignId = newDesign.id
 
@@ -1313,6 +1333,7 @@ export async function POST(request: Request) {
           style,
           budgetRange: "any",
           userPrompt: prompt || null,
+          mustInclude: pickedMustInclude,
           updatedAt: new Date().toISOString(),
         }
 
@@ -1348,6 +1369,7 @@ export async function POST(request: Request) {
       images: [generatedImageUrl],
       imageUrl: generatedImageUrl, // Also include as imageUrl for convenience
       designId: savedDesignId, // Include the saved design ID if available
+      mustInclude: mustIncludeResults,
       providerUsed: actualProviderUsed,
       model: actualModel,
       fallbackUsed,

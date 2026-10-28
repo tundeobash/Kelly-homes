@@ -26,6 +26,7 @@ export interface FurnishingPlanResult {
 export type KnownRoomType =
   | "bedroom"
   | "living room"
+  | "living and dining room"
   | "dining room"
   | "kitchen"
   | "office"
@@ -82,6 +83,28 @@ const GUIDES: Record<KnownRoomType, RoomGuide> = {
     ],
     extraItems: [
       { item: "side table", placement: "next to the sofa", scale: "small" },
+      { item: "media console", placement: "against the wall opposite the sofa", scale: "medium" },
+    ],
+  },
+  "living and dining room": {
+    roomType: "living and dining room",
+    label: "living and dining room",
+    layout:
+      "This is one open-plan room with two areas. Make a seating area with a sofa, a coffee table in front of it, a rug and lighting, and a separate dining area with a dining table and chairs, with a clear path between the two areas. If space is tight, choose a compact dining table, such as a round table for two or four, rather than leaving it out.",
+    requiredGroups: [
+      ["sofa", "sectional", "couch"],
+      ["dining table", "dining"],
+      ["coffee table", "cocktail table"],
+      ["rug"],
+    ],
+    fallbackItems: [
+      { item: "sofa", placement: "in the seating area, facing the conversation area", scale: "large" },
+      { item: "coffee table", placement: "in front of the sofa", scale: "medium" },
+      { item: "area rug", placement: "under the sofa and coffee table", scale: "large" },
+      { item: "dining table with chairs", placement: "in the dining area, clear of the seating area", scale: "large" },
+    ],
+    extraItems: [
+      { item: "pendant light", placement: "above the dining table", scale: "medium" },
       { item: "media console", placement: "against the wall opposite the sofa", scale: "medium" },
     ],
   },
@@ -182,6 +205,7 @@ export function normalizeRoomType(value: string | null | undefined): KnownRoomTy
   const text = (value || "").trim().toLowerCase()
   if (!text) return ""
   if (text.includes("bed")) return "bedroom"
+  if ((text.includes("living") || text.includes("lounge")) && text.includes("dining")) return "living and dining room"
   if (text.includes("dining")) return "dining room"
   if (text.includes("kitchen")) return "kitchen"
   if (text.includes("office") || text.includes("study")) return "office"
@@ -376,19 +400,29 @@ export interface RoomInspection {
   furniture: string[]
   looksLike: string
   notes: string
+  /** For each must-have piece asked about (lower-case name): is it clearly visible? */
+  mustHave?: Record<string, boolean>
 }
 
-export function buildInspectionPrompt(roomType: string | null | undefined): string {
+/** mustHaves: names of pieces the person asked for, such as "Dining table". */
+export function buildInspectionPrompt(roomType: string | null | undefined, mustHaves: string[] = []): string {
   const guide = getRoomGuide(roomType)
+  const names = mustHaves.map((name) => name.trim().toLowerCase()).filter(Boolean)
+  const mustHaveField = names.length
+    ? `,\n  "mustHave": {${names.map((name) => `"${name}": true or false`).join(", ")}}`
+    : ""
+  const mustHaveRule = names.length
+    ? "\nFor mustHave, answer true only if that piece is clearly visible in the photo."
+    : ""
   return `Look at this interior photo and answer with JSON only.
 {
   "empty": true or false,
   "furniture": ["visible major furniture pieces"],
-  "looksLike": "bedroom" | "living room" | "dining room" | "kitchen" | "office" | "other",
-  "notes": "one short sentence"
+  "looksLike": "bedroom" | "living room" | "living and dining room" | "dining room" | "kitchen" | "office" | "other",
+  "notes": "one short sentence"${mustHaveField}
 }
 empty is true only when the room has no major furniture.
-The project room type is ${guide.label}. List what is actually visible. Do not invent furniture.`
+The project room type is ${guide.label}. List what is actually visible. Do not invent furniture.${mustHaveRule}`
 }
 
 export function parseRoomInspection(text: string): RoomInspection {
@@ -404,12 +438,29 @@ export function parseRoomInspection(text: string): RoomInspection {
     ? parsed.furniture.map((item) => String(item)).filter(Boolean)
     : []
 
+  const mustHave: Record<string, boolean> = {}
+  if (parsed.mustHave && typeof parsed.mustHave === "object") {
+    for (const [name, value] of Object.entries(parsed.mustHave as Record<string, unknown>)) {
+      if (typeof value === "boolean") mustHave[name.trim().toLowerCase()] = value
+    }
+  }
+
   return {
     empty: parsed.empty === true,
     furniture,
     looksLike: typeof parsed.looksLike === "string" ? parsed.looksLike : "",
     notes: typeof parsed.notes === "string" ? parsed.notes : "",
+    mustHave,
   }
+}
+
+/** An open-plan living and dining room may be described as either of its two areas, and the reverse. */
+function sameKindOfRoom(requested: KnownRoomType, seen: KnownRoomType): boolean {
+  if (requested === seen) return true
+  const open = "living and dining room"
+  if (requested === open) return seen === "living room" || seen === "dining room"
+  if (seen === open) return requested === "living room" || requested === "dining room"
+  return false
 }
 
 export function assessRoomOutput(
@@ -444,7 +495,7 @@ export function assessRoomOutput(
   }
 
   const looksLike = normalizeRoomType(inspection.looksLike)
-  if (requested && looksLike && looksLike !== "other" && looksLike !== requested) {
+  if (requested && looksLike && looksLike !== "other" && !sameKindOfRoom(requested, looksLike)) {
     return {
       passed: false,
       reason: `The result looks like a ${looksLike}, not a ${guide.label}, so it was not saved.`,
@@ -458,10 +509,12 @@ export async function inspectGeneratedRoom(params: {
   imageBase64: string
   mimeType?: string
   roomType?: string | null
+  /** Names of must-have pieces to ask about, such as "Dining table". */
+  mustHaves?: string[]
   requestId?: string
   describe?: (prompt: string, image: { data: string; mimeType: string }) => Promise<string>
 }): Promise<RoomInspection> {
-  const prompt = buildInspectionPrompt(params.roomType)
+  const prompt = buildInspectionPrompt(params.roomType, params.mustHaves)
   const image = {
     data: params.imageBase64,
     mimeType: params.mimeType || "image/png",

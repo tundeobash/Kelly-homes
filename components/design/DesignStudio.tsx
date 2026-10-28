@@ -21,6 +21,7 @@ import {
 } from "@/lib/design/studioFlow"
 import type { StageRoomReply, StudioDesign, StudioFailure } from "@/lib/design/studioFlow"
 import { STUDIO_STYLES, findStudioStyle, styleDisplayName } from "@/lib/design/studioStyles"
+import { picksFromResults } from "@/lib/design/mustInclude"
 import { track } from "@/lib/tracking"
 
 export interface DesignStudioProject {
@@ -28,6 +29,8 @@ export interface DesignStudioProject {
   name: string
   roomType: string
   imageUrl: string | null
+  /** Must-have pieces picked for the latest design (lib/design/mustInclude.ts). */
+  mustInclude?: string[]
   /** Newest first, as stored. */
   designs: StudioDesign[]
 }
@@ -52,6 +55,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   const [photoUrl, setPhotoUrl] = useState<string | null>(project.imageUrl)
   const [picked, setPicked] = useState<string>(() => firstUnusedStyle(project.designs))
   const [note, setNote] = useState("")
+  const [mustInclude, setMustInclude] = useState<string[]>(project.mustInclude ?? [])
   const [startedAt, setStartedAt] = useState(0)
   const [generatingStyle, setGeneratingStyle] = useState<string>(picked)
   const [failure, setFailure] = useState<StudioFailure | null>(null)
@@ -84,7 +88,8 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     return () => window.removeEventListener("beforeunload", warn)
   }, [shown])
 
-  const generate = async (styleId: string) => {
+  /** mustOverride: the pieces to ask for instead of the current picks (Try again on a design). */
+  const generate = async (styleId: string, mustOverride?: string[]) => {
     if (busy.current) return
     if (!photoUrl) {
       go("choose")
@@ -108,6 +113,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           style: styleId,
           roomType: project.roomType || undefined,
           prompt: note.trim() || undefined,
+          mustInclude: mustOverride ?? mustInclude,
         }),
       })
       reply = (await res.json().catch(() => null)) as StageRoomReply | null
@@ -214,6 +220,9 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           onPhotoFile={uploadPhoto}
           uploading={uploading}
           uploadError={uploadError}
+          roomType={project.roomType}
+          mustInclude={mustInclude}
+          onMustIncludeChange={setMustInclude}
         />
       )}
 
@@ -246,6 +255,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
             generate(styleId)
           }}
           onSliderMoved={() => track("slider_used", project.id)}
+          onRetryMissing={() => generate(current.style, picksFromResults(current.mustInclude, project.roomType))}
         />
       )}
 

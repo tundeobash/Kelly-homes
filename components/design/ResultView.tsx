@@ -1,6 +1,8 @@
 "use client"
 
+import { AlertCircle, Check, Dot } from "lucide-react"
 import BeforeAfterSlider from "@/components/design/BeforeAfterSlider"
+import { missingMessage } from "@/lib/design/mustInclude"
 import { contactLinks } from "@/lib/landing"
 import { STUDIO_STYLES, findStudioStyle } from "@/lib/design/studioStyles"
 import type { StudioDesign } from "@/lib/design/studioFlow"
@@ -16,6 +18,8 @@ interface ResultViewProps {
   onCompare: () => void
   onTryStyle: (styleId: string) => void
   onSliderMoved?: () => void
+  /** Makes the same style again with the same must-have pieces. */
+  onRetryMissing?: () => void
 }
 
 export default function ResultView({
@@ -29,10 +33,15 @@ export default function ResultView({
   onCompare,
   onTryStyle,
   onSliderMoved,
+  onRetryMissing,
 }: ResultViewProps) {
   const feedback = contactLinks().feedback
   const used = new Set(usedStyles.map((style) => findStudioStyle(style)?.id ?? style))
   const nextStyles = STUDIO_STYLES.filter((style) => !used.has(style.id)).slice(0, 6)
+  const asked = design.mustInclude ?? []
+  const shownPieces = asked.filter((r) => r.included !== false)
+  const missing = missingMessage(asked)
+  const unchecked = asked.some((r) => r.included === null)
 
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-10">
@@ -54,6 +63,46 @@ export default function ResultView({
         <p className="mt-1.5 text-[13px] leading-normal text-ks-stone">
           Walls, windows and doors come from your photo. Furniture and decor are imagined by AI.
         </p>
+        {asked.length > 0 && (
+          <section className="mt-3.5 rounded-2xl border border-ks-line bg-white px-3.5 py-3">
+            {shownPieces.length > 0 && (
+              <>
+                <h2 className="font-sans text-[13px] font-semibold leading-normal text-ks-stone">
+                  {unchecked ? "You asked for" : "Included as you asked"}
+                </h2>
+                <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
+                  {shownPieces.map((piece) => (
+                    <li key={piece.id} className="flex items-center gap-2 text-[15px] font-medium text-ks-ink">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ks-sand text-ks-charcoal">
+                        {piece.included ? (
+                          <Check className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />
+                        ) : (
+                          <Dot className="h-4 w-4" aria-hidden="true" />
+                        )}
+                      </span>
+                      {piece.label}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {missing && (
+              <div className={`flex items-center gap-2.5 rounded-[10px] bg-[#FBF3E4] px-2.5 py-1.5 ${shownPieces.length > 0 ? "mt-2.5" : ""}`}>
+                <AlertCircle className="h-[18px] w-[18px] flex-shrink-0 text-[#92400E]" aria-hidden="true" />
+                <p className="flex-1 text-[14px] leading-snug text-ks-ink">{missing}</p>
+                {onRetryMissing && (
+                  <button
+                    type="button"
+                    onClick={onRetryMissing}
+                    className="flex min-h-[40px] items-center px-1 text-[14px] font-semibold text-ks-charcoal underline underline-offset-4"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+        )}
         {feedback && (
           <p className="mt-2 text-[13px] leading-normal text-ks-stone">
             Something look wrong?{" "}

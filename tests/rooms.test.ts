@@ -61,7 +61,7 @@ describe("room cards", () => {
     assert.equal(defaultRoomName("other"), "My room")
     assert.deepEqual(
       ROOM_TYPE_OPTIONS.map((o) => o.id),
-      ["living room", "bedroom", "dining room", "kitchen", "office", "other"]
+      ["living room", "living and dining room", "bedroom", "dining room", "kitchen", "office", "other"]
     )
   })
 })

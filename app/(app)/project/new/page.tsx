@@ -165,6 +165,9 @@ export default function AddRoomPage() {
             )
           })}
         </div>
+        {roomType === "living and dining room" && (
+          <p className="mt-2.5 text-[13px] leading-normal text-ks-stone">Every design keeps a sitting area and a dining area.</p>
+        )}
       </fieldset>
 
       {error && (

@@ -83,3 +83,21 @@ only production uses the live `main` branch.
 
 **Decision:** launch in the Gulf first. Gulf styles (Modern Arabic,
 Contemporary Majlis, Warm Modern Luxury) were added to the style list.
+
+## 2026-10-28 — Must include, and a Living + dining room type
+
+**Decision:** people can name up to 3 pieces a design must include (dining
+table, desk, TV unit, armchair, storage, bookshelf, floor seating). A new
+"Living + dining" room type always gets a dining table.
+
+- **Why:** tester Gianluca's living room design dropped his dining table. The
+  cause was the living-room layout, which has no dining area.
+- **How it works:** the picks go into the image instruction (choose compact
+  versions rather than leave one out). The Gemini check is asked whether each
+  piece is visible. The result shows "Included as you asked", or "We couldn't
+  fit the … this time" with Try again. A missing piece does not stop the design
+  being saved.
+- **Cap of 3:** Ayo, 28 Oct, to keep small rooms believable. No sofa bed: a
+  picture cannot show that it folds out.
+- **Next:** a photo of a piece you love (item 4), after the 28 Oct fidelity test
+  passed (6 of 6 pieces recognisably the same).

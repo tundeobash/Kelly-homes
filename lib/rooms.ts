@@ -5,6 +5,7 @@
 
 const ROOM_TYPE_LABELS: Record<string, string> = {
   "living room": "Living room",
+  "living and dining room": "Living + dining",
   bedroom: "Bedroom",
   "dining room": "Dining room",
   kitchen: "Kitchen",
@@ -15,6 +16,7 @@ const ROOM_TYPE_LABELS: Record<string, string> = {
 /** The room types offered when adding a room, in order. */
 export const ROOM_TYPE_OPTIONS: { id: string; label: string }[] = [
   { id: "living room", label: "Living room" },
+  { id: "living and dining room", label: "Living + dining" },
   { id: "bedroom", label: "Bedroom" },
   { id: "dining room", label: "Dining room" },
   { id: "kitchen", label: "Kitchen" },
@@ -31,6 +33,7 @@ export function roomTypeLabel(roomType: string | null | undefined): string {
 /** A name for a room the person left unnamed. */
 export function defaultRoomName(roomType: string | null | undefined): string {
   const label = roomTypeLabel(roomType)
+  if (label === "Living + dining") return "Living and dining room"
   return label === "Other room" ? "My room" : label
 }
 

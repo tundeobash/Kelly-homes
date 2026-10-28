@@ -2,6 +2,9 @@
  * The design screen's rules, kept free of React so they can be tested.
  */
 
+import { readMustIncludeResults } from "@/lib/design/mustInclude"
+import type { MustIncludeResult } from "@/lib/design/mustInclude"
+
 export const DESIGN_STEPS = [
   "Reading your room",
   "Keeping walls, windows and doors",
@@ -37,6 +40,8 @@ export interface StudioDesign {
   createdAt?: string | null
   /** The room photo this design was made from. Older designs don't have it. */
   sourceImageUrl?: string | null
+  /** Must-have pieces asked for, and whether each made it in. Older designs have none. */
+  mustInclude?: MustIncludeResult[]
 }
 
 /** What /api/ai/stage-room sends back (only the fields the screen uses). */
@@ -48,6 +53,7 @@ export interface StageRoomReply {
   errorMessage?: string
   errorCode?: string
   requestId?: string
+  mustInclude?: unknown
 }
 
 export type FailureKind = "failed" | "limit" | "signin" | "no-photo"
@@ -124,6 +130,7 @@ export function designFromReply(
     style: input.style,
     createdAt: input.now.toISOString(),
     sourceImageUrl: input.sourceImageUrl,
+    mustInclude: readMustIncludeResults(reply.mustInclude),
   }
 }
 

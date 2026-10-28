@@ -4,6 +4,7 @@ import {
   validateGeneratedImage,
 } from "@/lib/ai/generationValidation"
 import { getRoomGuide, normalizeRoomType } from "@/lib/ai/roomFurnishing"
+import { mustIncludeInstruction } from "@/lib/design/mustInclude"
 import { sanitizeProviderError } from "@/lib/ai/stabilityRenderer"
 import { styleCardText } from "@/lib/stylePrompts"
 import type { StyleCard } from "@/lib/stylePrompts"
@@ -52,6 +53,8 @@ export function buildOpenAIEditInstruction(params: {
   style: StyleCard
   userPrompt?: string
   moreFurniture?: boolean
+  /** Must-have piece ids (lib/design/mustInclude.ts). */
+  mustInclude?: string[]
 }): string {
   const normalized = normalizeRoomType(params.roomType)
   const known = normalized !== "" && normalized !== "other"
@@ -68,6 +71,7 @@ export function buildOpenAIEditInstruction(params: {
     CEILING_LIGHT_RULE,
     "Only add furniture, rugs, curtains, lamps, light fittings and decor.",
     known ? `Layout: ${guide.layout}` : "",
+    mustIncludeInstruction(params.mustInclude || []),
     params.moreFurniture ? "Furnish generously: include at least six pieces of furniture and decor." : "",
     `${params.style.name} style. ${styleCardText(params.style)} Avoid: ${params.style.avoid}.`,
     customerRequest ? `The customer also asked for: ${customerRequest}` : "",

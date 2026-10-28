@@ -99,6 +99,7 @@ describe("design replies", () => {
       style: "japandi",
       createdAt: now.toISOString(),
       sourceImageUrl: "https://blob.example/room.jpg",
+      mustInclude: [],
     })
   })
 
