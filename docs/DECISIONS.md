@@ -121,3 +121,16 @@ sends us the piece and the design (hand-run maker pilot).
   lib/landing.ts).
 - **Limits:** one piece per design. Modular pieces may take the old piece's
   layout; sizes are a guess unless a width is given.
+
+## 2026-10-29 — "Get a quote" on every design
+
+**Decision:** every design has "Get a quote": for the whole room, or for chosen
+pieces (the piece you love and the must-haves, plus anything typed). It opens
+one message to us, by WhatsApp when a number is set in lib/landing.ts, else
+email. The sheet promises "We'll reply within 2 working days" (Ayo, 29 Oct).
+
+- **Why:** getting the room done is the product; asking on every design shows
+  how many people want that (Phase D demand signal). Counted as quote_opened,
+  quote_room_sent and quote_pieces_sent.
+- Replaces the separate "Get a quote from a local maker" link under a piece,
+  which now opens the same sheet with that piece ticked.

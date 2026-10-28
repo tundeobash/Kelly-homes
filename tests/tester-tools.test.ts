@@ -66,7 +66,9 @@ describe("tracking", () => {
       "fullscreen_opened",
       "try_another_style",
       "piece_added",
-      "maker_quote_opened",
+      "quote_opened",
+      "quote_room_sent",
+      "quote_pieces_sent",
     ])
     assert.equal(isTrackedEvent("compare_opened"), true)
     assert.equal(isTrackedEvent("drop table"), false)

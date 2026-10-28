@@ -25,7 +25,6 @@ import { buildOpenAIEditForm, buildOpenAIEditInstruction } from "../lib/ai/opena
 import { getStyleCard } from "../lib/stylePrompts"
 import { designFromReply } from "../lib/design/studioFlow"
 import { missingMessage } from "../lib/design/mustInclude"
-import { makerQuoteLink } from "../lib/landing"
 import { roomBlobUrls } from "../lib/blobFiles"
 import { isTrackedEvent } from "../lib/tracking"
 
@@ -215,15 +214,6 @@ describe("pieces: saved designs, quotes and files", () => {
     assert.equal(made?.sourceImageUrl, "https://abc123.public.blob.vercel-storage.com/uploads/room.jpg")
   })
 
-  it("asks for a maker's quote with the piece and the design", () => {
-    const link = makerQuoteLink(pouf(), "https://abc123.public.blob.vercel-storage.com/generated/d.png", "", "ayo@example.com")
-    assert.ok(link?.startsWith("mailto:ayo@example.com?subject=Kelly%20Spaces%3A%20quote%20for%20a%20piece"))
-    assert.match(decodeURIComponent(link || ""), /quote from a local maker for this piece: round fabric pouf/)
-    assert.match(decodeURIComponent(link || ""), /In my design: https:\/\/abc123/)
-    const wa = makerQuoteLink(pouf(), "https://x.public.blob.vercel-storage.com/d.png", "+971 50 123 4567", "")
-    assert.ok(wa?.startsWith("https://wa.me/971501234567?text="))
-  })
-
   it("deletes a room's pieces with the room", () => {
     const urls = roomBlobUrls({
       imageUrl: null,
@@ -233,8 +223,7 @@ describe("pieces: saved designs, quotes and files", () => {
     assert.deepEqual(urls, [blob("d.png"), blob("used.jpg"), blob("listed.jpg")])
   })
 
-  it("counts pieces added and quotes asked for", () => {
+  it("counts pieces added", () => {
     assert.equal(isTrackedEvent("piece_added"), true)
-    assert.equal(isTrackedEvent("maker_quote_opened"), true)
   })
 })

@@ -10,6 +10,7 @@ import CompareView from "@/components/design/CompareView"
 import type { CompareItem } from "@/components/design/CompareView"
 import FailureView from "@/components/design/FailureView"
 import PieceSheet from "@/components/design/PieceSheet"
+import QuoteSheet from "@/components/design/QuoteSheet"
 import ImageLightbox from "@/components/design/ImageLightbox"
 import {
   addDesign,
@@ -65,6 +66,8 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   const [piece, setPiece] = useState<StudioPiece | null>(null)
   const [pieces, setPieces] = useState<StudioPiece[]>(project.pieces ?? [])
   const [pieceSheet, setPieceSheet] = useState<PieceMode | null>(null)
+  // "Get a quote" sheet: null when closed; preselect ticks one item.
+  const [quote, setQuote] = useState<{ preselect: string | null } | null>(null)
   const [startedAt, setStartedAt] = useState(0)
   const [generatingStyle, setGeneratingStyle] = useState<string>(picked)
   const [failure, setFailure] = useState<StudioFailure | null>(null)
@@ -297,7 +300,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
             })
           }
           onAddPiece={() => setPieceSheet("place")}
-          projectId={project.id}
+          onQuote={(preselect) => setQuote({ preselect: preselect ?? null })}
         />
       )}
 
@@ -337,6 +340,16 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
       )}
 
       {lightbox && <ImageLightbox src={lightbox.imageUrl} title={lightbox.name} onClose={closeLightbox} />}
+
+      <QuoteSheet
+        open={quote !== null && shown === "result"}
+        design={current}
+        roomName={project.name}
+        styleName={current ? styleDisplayName(current.style) : ""}
+        projectId={project.id}
+        preselect={quote?.preselect ?? null}
+        onClose={() => setQuote(null)}
+      />
 
       <PieceSheet
         open={pieceSheet !== null}

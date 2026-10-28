@@ -1,11 +1,11 @@
 "use client"
 
-import { AlertCircle, Check, Dot, Plus } from "lucide-react"
+import { AlertCircle, Check, ChevronRight, Dot, Plus, Receipt } from "lucide-react"
 import BeforeAfterSlider from "@/components/design/BeforeAfterSlider"
 import { missingMessage } from "@/lib/design/mustInclude"
-import { contactLinks, makerQuoteLink } from "@/lib/landing"
+import { contactLinks } from "@/lib/landing"
 import { pieceLabel } from "@/lib/design/pieces"
-import { track } from "@/lib/tracking"
+import { QUOTE_REPLY_PROMISE } from "@/lib/design/quote"
 import { STUDIO_STYLES, findStudioStyle } from "@/lib/design/studioStyles"
 import type { StudioDesign } from "@/lib/design/studioFlow"
 
@@ -24,7 +24,8 @@ interface ResultViewProps {
   onRetryMissing?: () => void
   /** Opens "Add a piece to this design". */
   onAddPiece?: () => void
-  projectId?: string
+  /** Opens "Get a quote", optionally with one item ticked (e.g. "piece:<id>"). */
+  onQuote?: (preselect?: string) => void
 }
 
 export default function ResultView({
@@ -40,7 +41,7 @@ export default function ResultView({
   onSliderMoved,
   onRetryMissing,
   onAddPiece,
-  projectId,
+  onQuote,
 }: ResultViewProps) {
   const feedback = contactLinks().feedback
   const used = new Set(usedStyles.map((style) => findStudioStyle(style)?.id ?? style))
@@ -51,7 +52,6 @@ export default function ResultView({
   const pieceShown = piece !== null && design.pieceIncluded !== false
   const missing = missingMessage(asked, piece && design.pieceIncluded === false ? [`your ${piece.name.toLowerCase()}`] : [])
   const unchecked = asked.some((r) => r.included === null) || (piece !== null && design.pieceIncluded == null)
-  const quoteLink = piece ? makerQuoteLink(piece, design.imageUrl) : null
 
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-10">
@@ -73,6 +73,24 @@ export default function ResultView({
         <p className="mt-1.5 text-[13px] leading-normal text-ks-stone">
           Walls, windows and doors come from your photo. Furniture and decor are imagined by AI.
         </p>
+        {onQuote && (
+          <button
+            type="button"
+            onClick={() => onQuote()}
+            className="mt-3.5 flex min-h-[60px] w-full items-center gap-3 rounded-2xl bg-ks-sand px-3.5 py-2.5 text-left outline-none transition-opacity duration-150 hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+          >
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white text-ks-charcoal">
+              <Receipt className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[15px] font-semibold leading-snug text-ks-ink">Get a quote</span>
+              <span className="text-[13px] leading-snug text-ks-charcoal">
+                For the whole room or chosen pieces. {QUOTE_REPLY_PROMISE}
+              </span>
+            </span>
+            <ChevronRight className="h-[18px] w-[18px] flex-shrink-0 text-ks-charcoal" aria-hidden="true" />
+          </button>
+        )}
         {(asked.length > 0 || piece) && (
           <section className="mt-3.5 rounded-2xl border border-ks-line bg-white px-3.5 py-3">
             {(shownPieces.length > 0 || pieceShown) && (
@@ -104,16 +122,14 @@ export default function ResultView({
                         ) : null}
                         Your {pieceLabel(piece).toLowerCase()}
                       </p>
-                      {quoteLink && (
-                        <a
-                          href={quoteLink}
-                          target={quoteLink.startsWith("https:") ? "_blank" : undefined}
-                          rel={quoteLink.startsWith("https:") ? "noopener noreferrer" : undefined}
-                          onClick={() => track("maker_quote_opened", projectId)}
+                      {onQuote && (
+                        <button
+                          type="button"
+                          onClick={() => onQuote(`piece:${piece.id}`)}
                           className="inline-flex min-h-[32px] items-center text-[14px] font-medium text-ks-charcoal underline underline-offset-4"
                         >
-                          Want this one? Get a quote from a local maker
-                        </a>
+                          Want this one? Get a quote for it
+                        </button>
                       )}
                     </div>
                   </div>

@@ -10,7 +10,9 @@ export const TRACKED_EVENTS = [
   "fullscreen_opened",
   "try_another_style",
   "piece_added", // saved a photo of a piece they love (29 Oct 2026)
-  "maker_quote_opened", // tapped "Get a quote from a local maker"
+  "quote_opened", // opened "Get a quote" on a design
+  "quote_room_sent", // sent a quote request for the whole room
+  "quote_pieces_sent", // sent a quote request for chosen pieces
 ] as const
 
 export type TrackedEvent = (typeof TRACKED_EVENTS)[number]
