@@ -338,7 +338,7 @@ export async function DELETE(
     if (shouldDeleteFiles()) {
       const otherRooms = await prisma.roomProject.findMany({
         where: { userId: project.userId, id: { not: id } },
-        select: { imageUrl: true, aiDesignsJson: true },
+        select: { imageUrl: true, aiDesignsJson: true, lastAiSettings: true },
       })
       storedFiles = filesOnlyThisRoomUses(project, otherRooms)
     }

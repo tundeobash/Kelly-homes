@@ -100,6 +100,10 @@ describe("design replies", () => {
       createdAt: now.toISOString(),
       sourceImageUrl: "https://blob.example/room.jpg",
       mustInclude: [],
+      piece: null,
+      pieceMode: null,
+      pieceIncluded: null,
+      baseDesignId: null,
     })
   })
 

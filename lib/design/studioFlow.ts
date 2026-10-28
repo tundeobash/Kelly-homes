@@ -4,6 +4,8 @@
 
 import { readMustIncludeResults } from "@/lib/design/mustInclude"
 import type { MustIncludeResult } from "@/lib/design/mustInclude"
+import { cleanPiece, cleanPieceMode } from "@/lib/design/pieces"
+import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
 
 export const DESIGN_STEPS = [
   "Reading your room",
@@ -42,6 +44,12 @@ export interface StudioDesign {
   sourceImageUrl?: string | null
   /** Must-have pieces asked for, and whether each made it in. Older designs have none. */
   mustInclude?: MustIncludeResult[]
+  /** A piece the person loves in this design, how it was used, and whether the check saw it. */
+  piece?: StudioPiece | null
+  pieceMode?: PieceMode | null
+  pieceIncluded?: boolean | null
+  /** For a piece added to an existing design: that design. */
+  baseDesignId?: string | null
 }
 
 /** What /api/ai/stage-room sends back (only the fields the screen uses). */
@@ -54,6 +62,11 @@ export interface StageRoomReply {
   errorCode?: string
   requestId?: string
   mustInclude?: unknown
+  piece?: unknown
+  pieceMode?: unknown
+  pieceIncluded?: unknown
+  baseDesignId?: unknown
+  sourceImageUrl?: unknown
 }
 
 export type FailureKind = "failed" | "limit" | "signin" | "no-photo"
@@ -129,8 +142,12 @@ export function designFromReply(
     imageUrl,
     style: input.style,
     createdAt: input.now.toISOString(),
-    sourceImageUrl: input.sourceImageUrl,
+    sourceImageUrl: typeof reply.sourceImageUrl === "string" && reply.sourceImageUrl ? reply.sourceImageUrl : input.sourceImageUrl,
     mustInclude: readMustIncludeResults(reply.mustInclude),
+    piece: cleanPiece(reply.piece),
+    pieceMode: cleanPieceMode(reply.pieceMode),
+    pieceIncluded: typeof reply.pieceIncluded === "boolean" ? reply.pieceIncluded : null,
+    baseDesignId: typeof reply.baseDesignId === "string" ? reply.baseDesignId : null,
   }
 }
 

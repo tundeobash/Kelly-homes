@@ -1,9 +1,11 @@
 "use client"
 
-import { AlertCircle, Check, Dot } from "lucide-react"
+import { AlertCircle, Check, Dot, Plus } from "lucide-react"
 import BeforeAfterSlider from "@/components/design/BeforeAfterSlider"
 import { missingMessage } from "@/lib/design/mustInclude"
-import { contactLinks } from "@/lib/landing"
+import { contactLinks, makerQuoteLink } from "@/lib/landing"
+import { pieceLabel } from "@/lib/design/pieces"
+import { track } from "@/lib/tracking"
 import { STUDIO_STYLES, findStudioStyle } from "@/lib/design/studioStyles"
 import type { StudioDesign } from "@/lib/design/studioFlow"
 
@@ -20,6 +22,9 @@ interface ResultViewProps {
   onSliderMoved?: () => void
   /** Makes the same style again with the same must-have pieces. */
   onRetryMissing?: () => void
+  /** Opens "Add a piece to this design". */
+  onAddPiece?: () => void
+  projectId?: string
 }
 
 export default function ResultView({
@@ -34,14 +39,19 @@ export default function ResultView({
   onTryStyle,
   onSliderMoved,
   onRetryMissing,
+  onAddPiece,
+  projectId,
 }: ResultViewProps) {
   const feedback = contactLinks().feedback
   const used = new Set(usedStyles.map((style) => findStudioStyle(style)?.id ?? style))
   const nextStyles = STUDIO_STYLES.filter((style) => !used.has(style.id)).slice(0, 6)
   const asked = design.mustInclude ?? []
   const shownPieces = asked.filter((r) => r.included !== false)
-  const missing = missingMessage(asked)
-  const unchecked = asked.some((r) => r.included === null)
+  const piece = design.piece ?? null
+  const pieceShown = piece !== null && design.pieceIncluded !== false
+  const missing = missingMessage(asked, piece && design.pieceIncluded === false ? [`your ${piece.name.toLowerCase()}`] : [])
+  const unchecked = asked.some((r) => r.included === null) || (piece !== null && design.pieceIncluded == null)
+  const quoteLink = piece ? makerQuoteLink(piece, design.imageUrl) : null
 
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-10">
@@ -63,9 +73,9 @@ export default function ResultView({
         <p className="mt-1.5 text-[13px] leading-normal text-ks-stone">
           Walls, windows and doors come from your photo. Furniture and decor are imagined by AI.
         </p>
-        {asked.length > 0 && (
+        {(asked.length > 0 || piece) && (
           <section className="mt-3.5 rounded-2xl border border-ks-line bg-white px-3.5 py-3">
-            {shownPieces.length > 0 && (
+            {(shownPieces.length > 0 || pieceShown) && (
               <>
                 <h2 className="font-sans text-[13px] font-semibold leading-normal text-ks-stone">
                   {unchecked ? "You asked for" : "Included as you asked"}
@@ -84,6 +94,30 @@ export default function ResultView({
                     </li>
                   ))}
                 </ul>
+                {piece && pieceShown && (
+                  <div className="mt-2 flex items-start gap-2.5">
+                    <img src={piece.imageUrl} alt="" className="mt-0.5 h-9 w-9 flex-shrink-0 rounded-lg object-cover" />
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-1.5 text-[15px] font-medium leading-snug text-ks-ink">
+                        {design.pieceIncluded ? (
+                          <Check className="h-3.5 w-3.5 flex-shrink-0 text-ks-charcoal" strokeWidth={2.4} aria-hidden="true" />
+                        ) : null}
+                        Your {pieceLabel(piece).toLowerCase()}
+                      </p>
+                      {quoteLink && (
+                        <a
+                          href={quoteLink}
+                          target={quoteLink.startsWith("https:") ? "_blank" : undefined}
+                          rel={quoteLink.startsWith("https:") ? "noopener noreferrer" : undefined}
+                          onClick={() => track("maker_quote_opened", projectId)}
+                          className="inline-flex min-h-[32px] items-center text-[14px] font-medium text-ks-charcoal underline underline-offset-4"
+                        >
+                          Want this one? Get a quote from a local maker
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
             {missing && (
@@ -102,6 +136,21 @@ export default function ResultView({
               </div>
             )}
           </section>
+        )}
+        {onAddPiece && (
+          <button
+            type="button"
+            onClick={onAddPiece}
+            className="mt-3 flex min-h-[52px] w-full items-center gap-3 rounded-2xl border border-ks-line bg-white px-3.5 py-2 text-left outline-none transition-colors duration-150 hover:border-ks-charcoal focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+          >
+            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[#D1D5DB] text-ks-charcoal">
+              <Plus className="h-4 w-4" strokeWidth={2.2} aria-hidden="true" />
+            </span>
+            <span className="flex flex-col">
+              <span className="text-[15px] font-semibold leading-snug text-ks-ink">Add a piece to this design</span>
+              <span className="text-[13px] leading-snug text-ks-stone">A photo of a piece you love; the rest stays as it is</span>
+            </span>
+          </button>
         )}
         {feedback && (
           <p className="mt-2 text-[13px] leading-normal text-ks-stone">

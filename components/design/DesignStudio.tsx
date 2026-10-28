@@ -9,6 +9,7 @@ import ResultView from "@/components/design/ResultView"
 import CompareView from "@/components/design/CompareView"
 import type { CompareItem } from "@/components/design/CompareView"
 import FailureView from "@/components/design/FailureView"
+import PieceSheet from "@/components/design/PieceSheet"
 import ImageLightbox from "@/components/design/ImageLightbox"
 import {
   addDesign,
@@ -22,6 +23,8 @@ import {
 import type { StageRoomReply, StudioDesign, StudioFailure } from "@/lib/design/studioFlow"
 import { STUDIO_STYLES, findStudioStyle, styleDisplayName } from "@/lib/design/studioStyles"
 import { picksFromResults } from "@/lib/design/mustInclude"
+import { addPiece } from "@/lib/design/pieces"
+import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
 import { track } from "@/lib/tracking"
 
 export interface DesignStudioProject {
@@ -31,6 +34,8 @@ export interface DesignStudioProject {
   imageUrl: string | null
   /** Must-have pieces picked for the latest design (lib/design/mustInclude.ts). */
   mustInclude?: string[]
+  /** The room's pieces the person loves, newest first (lib/design/pieces.ts). */
+  pieces?: StudioPiece[]
   /** Newest first, as stored. */
   designs: StudioDesign[]
 }
@@ -56,6 +61,10 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   const [picked, setPicked] = useState<string>(() => firstUnusedStyle(project.designs))
   const [note, setNote] = useState("")
   const [mustInclude, setMustInclude] = useState<string[]>(project.mustInclude ?? [])
+  // A piece for the next design ("around" mode), the room's pieces, and which piece sheet is open.
+  const [piece, setPiece] = useState<StudioPiece | null>(null)
+  const [pieces, setPieces] = useState<StudioPiece[]>(project.pieces ?? [])
+  const [pieceSheet, setPieceSheet] = useState<PieceMode | null>(null)
   const [startedAt, setStartedAt] = useState(0)
   const [generatingStyle, setGeneratingStyle] = useState<string>(picked)
   const [failure, setFailure] = useState<StudioFailure | null>(null)
@@ -66,6 +75,11 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const busy = useRef(false)
+  // The last design asked for, so "Try again" after a failure repeats it exactly.
+  const lastRequest = useRef<{
+    style: string
+    opts: { must?: string[]; piece?: StudioPiece | null; mode?: PieceMode; baseDesignId?: string | null }
+  } | null>(null)
   const closeLightbox = useCallback(() => setLightbox(null), [])
 
   const current = designs.find((d) => d.id === currentId) ?? designs[0] ?? null
@@ -88,8 +102,21 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     return () => window.removeEventListener("beforeunload", warn)
   }, [shown])
 
-  /** mustOverride: the pieces to ask for instead of the current picks (Try again on a design). */
-  const generate = async (styleId: string, mustOverride?: string[]) => {
+  /**
+   * opts.must: the must-haves to ask for instead of the current picks (Try again on a design).
+   * opts.piece / mode / baseDesignId: a piece to use instead of the current one; "place" adds it
+   * to the design baseDesignId.
+   */
+  const generate = async (
+    styleId: string,
+    opts: { must?: string[]; piece?: StudioPiece | null; mode?: PieceMode; baseDesignId?: string | null } = {}
+  ) => {
+    const usePiece = opts.piece !== undefined ? opts.piece : piece
+    const mode: PieceMode | undefined = usePiece ? opts.mode ?? "around" : undefined
+    lastRequest.current = {
+      style: styleId,
+      opts: { must: opts.must ?? mustInclude, piece: usePiece ?? null, mode, baseDesignId: opts.baseDesignId ?? null },
+    }
     if (busy.current) return
     if (!photoUrl) {
       go("choose")
@@ -113,7 +140,10 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           style: styleId,
           roomType: project.roomType || undefined,
           prompt: note.trim() || undefined,
-          mustInclude: mustOverride ?? mustInclude,
+          mustInclude: opts.must ?? mustInclude,
+          piece: usePiece || undefined,
+          pieceMode: mode,
+          baseDesignId: mode === "place" ? opts.baseDesignId || undefined : undefined,
         }),
       })
       reply = (await res.json().catch(() => null)) as StageRoomReply | null
@@ -223,6 +253,9 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           roomType={project.roomType}
           mustInclude={mustInclude}
           onMustIncludeChange={setMustInclude}
+          piece={piece}
+          onAddPiece={() => setPieceSheet("around")}
+          onRemovePiece={() => setPiece(null)}
         />
       )}
 
@@ -255,7 +288,16 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
             generate(styleId)
           }}
           onSliderMoved={() => track("slider_used", project.id)}
-          onRetryMissing={() => generate(current.style, picksFromResults(current.mustInclude, project.roomType))}
+          onRetryMissing={() =>
+            generate(current.style, {
+              must: picksFromResults(current.mustInclude, project.roomType),
+              piece: current.piece ?? null,
+              mode: current.pieceMode ?? undefined,
+              baseDesignId: current.baseDesignId ?? null,
+            })
+          }
+          onAddPiece={() => setPieceSheet("place")}
+          projectId={project.id}
         />
       )}
 
@@ -284,13 +326,36 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           failure={failure}
           photoUrl={photoUrl}
           hasDesigns={designs.length > 0}
-          onRetry={() => generate(generatingStyle)}
+          onRetry={() =>
+            lastRequest.current
+              ? generate(lastRequest.current.style, lastRequest.current.opts)
+              : generate(generatingStyle)
+          }
           onChooseAnother={() => go("choose")}
           onSeeDesigns={() => go("result")}
         />
       )}
 
       {lightbox && <ImageLightbox src={lightbox.imageUrl} title={lightbox.name} onClose={closeLightbox} />}
+
+      <PieceSheet
+        open={pieceSheet !== null}
+        projectId={project.id}
+        pieces={pieces}
+        title={pieceSheet === "place" ? "Add a piece to this design" : "A piece you love"}
+        useLabel={pieceSheet === "place" ? "Add it to my design" : "Use this piece"}
+        onClose={() => setPieceSheet(null)}
+        onSaved={(saved) => setPieces((list) => addPiece(list, saved))}
+        onUse={(chosen) => {
+          const purpose = pieceSheet
+          setPieceSheet(null)
+          if (purpose === "place" && current) {
+            generate(current.style, { must: [], piece: chosen, mode: "place", baseDesignId: current.id })
+          } else {
+            setPiece(chosen)
+          }
+        }}
+      />
     </div>
   )
 }

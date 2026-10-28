@@ -27,6 +27,15 @@ import {
   piecesToCheck,
   uncheckedMustIncludes,
 } from "@/lib/design/mustInclude"
+import {
+  addPiece,
+  cleanPiece,
+  cleanPieceMode,
+  pieceCheckName,
+  pieceIncluded,
+  placePieceInstruction,
+  readPieces,
+} from "@/lib/design/pieces"
 import { runTwoPassStability } from "@/lib/ai/twoPassGeneration"
 import { decideImageProvider, stageLabel } from "@/lib/ai/generationPolicy"
 import { InvalidImageError, UnchangedImageError, validateGeneratedImage, sha256 } from "@/lib/ai/generationValidation"
@@ -612,6 +621,10 @@ export async function POST(request: Request) {
     const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture, roomType: requestedRoomType } = body
     // Must-have pieces the person picked (at most 3, known ids only).
     const pickedMustInclude = cleanMustInclude(body?.mustInclude)
+    // A piece the person loves: "around" builds a new design around it; "place" adds it to an existing design.
+    const requestedPiece = cleanPiece(body?.piece)
+    const pieceMode = requestedPiece ? cleanPieceMode(body?.pieceMode) ?? "around" : null
+    const baseDesignId = typeof body?.baseDesignId === "string" ? body.baseDesignId.slice(0, 80) : null
 
     // Resolve the style card (every style in the app has one)
     const styleKey = (typeof style === "string" ? style : "").toLowerCase()
@@ -787,12 +800,35 @@ export async function POST(request: Request) {
       )
     }
 
+    // The room photo a design is made from. When adding a piece to an existing design,
+    // that design is edited instead, and the before/after still shows the room photo.
+    let sourcePhotoUrl: string = imageUrl
+    if (pieceMode === "place") {
+      const designs: any[] = Array.isArray(project?.aiDesignsJson) ? (project.aiDesignsJson as any[]) : []
+      const base = designs.find((d) => d && typeof d === "object" && d.id === baseDesignId)
+      if (!base || typeof base.imageUrl !== "string" || !isAllowedImageUrl(base.imageUrl)) {
+        return NextResponse.json(
+          {
+            success: false,
+            errorMessage: "That design could not be found. Open it again, then add the piece.",
+            errorCode: "BASE_DESIGN_NOT_FOUND",
+            retryable: false,
+            requestId,
+          },
+          { status: 200 }
+        )
+      }
+      sourcePhotoUrl = typeof base.sourceImageUrl === "string" && base.sourceImageUrl ? base.sourceImageUrl : imageUrl
+      imageUrl = base.imageUrl as string
+    }
+
     const resolvedRoomType = resolveRoomType({
       requested: typeof requestedRoomType === "string" ? requestedRoomType : "",
       saved: project?.roomType,
     })
     // What to ask for and check: the picks, plus a dining table for a living and dining room.
-    const mustIncludeIds = piecesToCheck(pickedMustInclude, resolvedRoomType)
+    // Adding a piece to an existing design asks for nothing else.
+    const mustIncludeIds = pieceMode === "place" ? [] : piecesToCheck(pickedMustInclude, resolvedRoomType)
 
     console.log(`[${requestId}] Room type received`, {
       fromRequest: typeof requestedRoomType === "string" && requestedRoomType.trim()
@@ -951,6 +987,28 @@ export async function POST(request: Request) {
       )
     }
 
+    // The piece's photo goes to the image model as a second picture.
+    let pieceImage: { buffer: Buffer; mimeType: string } | null = null
+    if (requestedPiece) {
+      try {
+        const pieceResponse = await fetch(requestedPiece.imageUrl)
+        if (!pieceResponse.ok) throw new Error(`HTTP ${pieceResponse.status}`)
+        pieceImage = { buffer: Buffer.from(await pieceResponse.arrayBuffer()), mimeType: "image/jpeg" }
+      } catch (error: unknown) {
+        console.error(`[${requestId}] Could not load the piece photo`, {
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return NextResponse.json({
+          success: false,
+          errorMessage: "We couldn't load your piece's photo. Please add it again.",
+          errorCode: "PIECE_LOAD_FAILED",
+          retryable: false,
+          requestId,
+          stage: "input",
+        })
+      }
+    }
+
     // Generate image with retry
     let generatedImageBuffer: Buffer | null = null
     let actualProviderUsed: "stability" | "openai" = selectedProvider
@@ -1104,17 +1162,22 @@ export async function POST(request: Request) {
         }
       } else if (selectedProvider === "openai") {
         // Default path: one OpenAI image edit, guided by the style card.
-        const instruction = buildOpenAIEditInstruction({
-          roomType: resolvedRoomType,
-          style: styleCard,
-          userPrompt,
-          moreFurniture: moreFurniture === true,
-          mustInclude: mustIncludeIds,
-        })
+        const instruction =
+          pieceMode === "place" && requestedPiece
+            ? placePieceInstruction(requestedPiece)
+            : buildOpenAIEditInstruction({
+                roomType: resolvedRoomType,
+                style: styleCard,
+                userPrompt,
+                moreFurniture: moreFurniture === true,
+                mustInclude: mustIncludeIds,
+                piece: requestedPiece,
+              })
         console.log(`[${requestId}] OpenAI redesign`, {
           roomType: resolvedRoomType || "unspecified",
           style: styleCard.id,
           mustInclude: mustIncludeIds,
+          piece: requestedPiece ? `${pieceMode}:${requestedPiece.name}` : null,
           instructionLength: instruction.length,
         })
         const rendered = await renderWithOpenAI({
@@ -1122,6 +1185,7 @@ export async function POST(request: Request) {
           mimeType: "image/png",
           prompt: instruction,
           requestId,
+          extraImages: pieceImage ? [pieceImage] : undefined,
         })
         generatedImageBuffer = rendered.buffer
         actualProviderUsed = "openai"
@@ -1210,6 +1274,7 @@ export async function POST(request: Request) {
 
     // Whether each must-have piece made it into the design (null when the check does not run).
     let mustIncludeResults = uncheckedMustIncludes(mustIncludeIds)
+    let pieceWasIncluded: boolean | null = null
 
     // The furnishing check uses Gemini (text only). Without a Gemini key it is skipped
     // and logged, rather than throwing away a good redesign.
@@ -1225,11 +1290,15 @@ export async function POST(request: Request) {
           imageBase64: generatedImageBuffer.toString("base64"),
           mimeType,
           roomType: resolvedRoomType,
-          mustHaves: mustIncludeIds.map((id) => findMustInclude(id)?.label || id),
+          mustHaves: [
+            ...mustIncludeIds.map((id) => findMustInclude(id)?.label || id),
+            ...(requestedPiece ? [pieceCheckName(requestedPiece)] : []),
+          ],
           requestId,
         })
         const furnishing = assessRoomOutput(inspection, resolvedRoomType)
         mustIncludeResults = checkMustIncludes(inspection, mustIncludeIds)
+        pieceWasIncluded = requestedPiece ? pieceIncluded(inspection, requestedPiece) : null
         console.log(`[${requestId}] Output validation`, {
           roomType: resolvedRoomType || "unspecified",
           passed: furnishing.passed,
@@ -1237,6 +1306,7 @@ export async function POST(request: Request) {
           looksLike: inspection.looksLike || null,
           furnitureCount: inspection.furniture.length,
           mustInclude: mustIncludeResults.map((r) => `${r.id}:${r.included}`),
+          piece: requestedPiece ? `${requestedPiece.name}:${pieceWasIncluded}` : null,
         })
         if (!furnishing.passed) {
           return NextResponse.json({
@@ -1310,18 +1380,35 @@ export async function POST(request: Request) {
     let savedDesignId: string | null = null
     if (projectId && project) {
       try {
-        const existingDesigns = (project.aiDesignsJson as any[]) || []
+        // Read the room again so designs and pieces saved meanwhile are kept.
+        const fresh = await prisma.roomProject.findUnique({
+          where: { id: projectId },
+          select: { aiDesignsJson: true, lastAiSettings: true },
+        })
+        const existingDesigns = (Array.isArray(fresh?.aiDesignsJson) ? fresh?.aiDesignsJson : project.aiDesignsJson) as any[] || []
+        const previousSettings =
+          fresh?.lastAiSettings && typeof fresh.lastAiSettings === "object" && !Array.isArray(fresh.lastAiSettings)
+            ? (fresh.lastAiSettings as Record<string, unknown>)
+            : {}
         const newDesign = {
           id: `design_${Date.now()}_${randomBytes(4).toString("hex")}`,
           imageUrl: generatedImageUrl,
           // The photo this design was made from, so before/after stays right if the room photo changes
-          sourceImageUrl: imageUrl,
+          sourceImageUrl: sourcePhotoUrl,
           style,
           budgetRange: "any",
           provider: actualProviderUsed,
           model: actualModel,
           createdAt: new Date().toISOString(),
           ...(mustIncludeResults.length > 0 ? { mustInclude: mustIncludeResults } : {}),
+          ...(requestedPiece
+            ? {
+                piece: requestedPiece,
+                pieceMode,
+                pieceIncluded: pieceWasIncluded,
+                ...(pieceMode === "place" && baseDesignId ? { baseDesignId } : {}),
+              }
+            : {}),
         }
         savedDesignId = newDesign.id
 
@@ -1329,11 +1416,14 @@ export async function POST(request: Request) {
         const updatedDesigns = [newDesign, ...existingDesigns].slice(0, 12)
 
         // Update lastAiSettings
+        const previousPieces = readPieces(previousSettings.pieces)
         const lastAiSettings = {
           style,
           budgetRange: "any",
           userPrompt: prompt || null,
-          mustInclude: pickedMustInclude,
+          // Adding a piece to a design keeps the room's Must include picks as they were.
+          mustInclude: pieceMode === "place" ? cleanMustInclude(previousSettings.mustInclude) : pickedMustInclude,
+          pieces: requestedPiece ? addPiece(previousPieces, requestedPiece) : previousPieces,
           updatedAt: new Date().toISOString(),
         }
 
@@ -1341,7 +1431,8 @@ export async function POST(request: Request) {
           where: { id: projectId },
           data: {
             aiDesignsJson: updatedDesigns,
-            lastAiSettings: lastAiSettings,
+            // Plain JSON (pieces are plain objects).
+            lastAiSettings: JSON.parse(JSON.stringify(lastAiSettings)),
           },
         })
 
@@ -1370,6 +1461,11 @@ export async function POST(request: Request) {
       imageUrl: generatedImageUrl, // Also include as imageUrl for convenience
       designId: savedDesignId, // Include the saved design ID if available
       mustInclude: mustIncludeResults,
+      piece: requestedPiece,
+      pieceMode,
+      pieceIncluded: pieceWasIncluded,
+      baseDesignId: pieceMode === "place" ? baseDesignId : null,
+      sourceImageUrl: sourcePhotoUrl,
       providerUsed: actualProviderUsed,
       model: actualModel,
       fallbackUsed,

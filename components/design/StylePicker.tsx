@@ -4,6 +4,8 @@ import { useRef, useState } from "react"
 import { Check, ChevronRight, ImagePlus, Loader2, Plus, Sofa, X } from "lucide-react"
 import MustIncludeSheet from "@/components/design/MustIncludeSheet"
 import { findMustInclude } from "@/lib/design/mustInclude"
+import { pieceLabel } from "@/lib/design/pieces"
+import type { StudioPiece } from "@/lib/design/pieces"
 import { STUDIO_STYLES } from "@/lib/design/studioStyles"
 import type { StudioStyle } from "@/lib/design/studioStyles"
 
@@ -21,6 +23,10 @@ interface StylePickerProps {
   /** Must-have piece ids (lib/design/mustInclude.ts). */
   mustInclude: string[]
   onMustIncludeChange: (ids: string[]) => void
+  /** A piece the person loves, for the next design. */
+  piece: StudioPiece | null
+  onAddPiece: () => void
+  onRemovePiece: () => void
 }
 
 const gulfStyles = STUDIO_STYLES.filter((style) => style.gulf)
@@ -80,6 +86,9 @@ export default function StylePicker({
   roomType,
   mustInclude,
   onMustIncludeChange,
+  piece,
+  onAddPiece,
+  onRemovePiece,
 }: StylePickerProps) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [noteOpen, setNoteOpen] = useState(note.trim().length > 0)
@@ -210,7 +219,7 @@ export default function StylePicker({
             </button>
           )}
         </div>
-        {mustInclude.length === 0 ? (
+        {mustInclude.length === 0 && !piece ? (
           <button
             type="button"
             onClick={() => setSheetOpen(true)}
@@ -221,7 +230,7 @@ export default function StylePicker({
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[15px] font-semibold leading-snug text-ks-ink">Must include</span>
-              <span className="text-[13px] leading-snug text-ks-stone">Furniture this room has to have</span>
+              <span className="text-[13px] leading-snug text-ks-stone">Furniture you need, or a piece you love</span>
             </span>
             <ChevronRight className="h-[18px] w-[18px] flex-shrink-0 text-ks-stone" aria-hidden="true" />
           </button>
@@ -257,6 +266,20 @@ export default function StylePicker({
                   </span>
                 )
               })}
+              {piece && (
+                <span className="flex h-10 items-center gap-1.5 rounded-full border border-[#D1D5DB] bg-white pl-1 pr-1 text-[14px] font-medium text-ks-charcoal">
+                  <img src={piece.imageUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+                  <span className="max-w-[150px] truncate text-[14px] font-medium">{pieceLabel(piece)}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${pieceLabel(piece)}`}
+                    onClick={onRemovePiece}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-ks-stone hover:bg-ks-paper"
+                  >
+                    <X className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden="true" />
+                  </button>
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -276,6 +299,9 @@ export default function StylePicker({
         roomType={roomType}
         onChange={onMustIncludeChange}
         onClose={() => setSheetOpen(false)}
+        piece={piece}
+        onAddPiece={onAddPiece}
+        onRemovePiece={onRemovePiece}
       />
     </div>
   )

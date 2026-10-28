@@ -55,6 +55,24 @@ export interface ContactLinks {
   feedback: string | null
 }
 
+/**
+ * "Get a quote from a local maker" under a piece in a design (hand-run maker pilot, from 29 Oct 2026):
+ * a message to us with the piece and the design.
+ */
+export function makerQuoteLink(
+  piece: { name: string; imageUrl: string },
+  designUrl: string,
+  whatsappNumber: string | null | undefined = WHATSAPP_NUMBER,
+  email: string | null | undefined = INVITE_EMAIL
+): string | null {
+  const text = [
+    `Hello, I'd like a quote from a local maker for this piece: ${piece.name}.`,
+    `The piece: ${piece.imageUrl}`,
+    `In my design: ${designUrl}`,
+  ].join("\n")
+  return whatsappLink(whatsappNumber, text) ?? mailto(email, "Kelly Spaces: quote for a piece", text)
+}
+
 /** WhatsApp when a number is set, otherwise email. */
 export function contactLinks(
   whatsappNumber: string | null | undefined = WHATSAPP_NUMBER,

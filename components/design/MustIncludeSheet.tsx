@@ -1,8 +1,10 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { Check, X } from "lucide-react"
+import { Camera, Check, X } from "lucide-react"
 import { MUST_INCLUDE_LIMIT, MUST_INCLUDE_OPTIONS, toggleMustInclude } from "@/lib/design/mustInclude"
+import { pieceLabel } from "@/lib/design/pieces"
+import type { StudioPiece } from "@/lib/design/pieces"
 
 interface MustIncludeSheetProps {
   open: boolean
@@ -10,10 +12,23 @@ interface MustIncludeSheetProps {
   roomType: string
   onChange: (ids: string[]) => void
   onClose: () => void
+  /** A piece the person loves, for the next design. */
+  piece: StudioPiece | null
+  onAddPiece: () => void
+  onRemovePiece: () => void
 }
 
 /** The "Must include" sheet on the style step: up to three pieces the design has to have. */
-export default function MustIncludeSheet({ open, picked, roomType, onChange, onClose }: MustIncludeSheetProps) {
+export default function MustIncludeSheet({
+  open,
+  picked,
+  roomType,
+  onChange,
+  onClose,
+  piece,
+  onAddPiece,
+  onRemovePiece,
+}: MustIncludeSheetProps) {
   const headingRef = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
@@ -31,8 +46,8 @@ export default function MustIncludeSheet({ open, picked, roomType, onChange, onC
   const livingDining = roomType.trim().toLowerCase() === "living and dining room"
   const options = MUST_INCLUDE_OPTIONS.filter((option) => !(livingDining && option.id === "dining-table"))
   const full = picked.length >= MUST_INCLUDE_LIMIT
-  const countLabel =
-    picked.length === 0 ? "Nothing picked yet" : picked.length === 1 ? "1 piece picked" : `${picked.length} pieces picked`
+  const count = picked.length + (piece ? 1 : 0)
+  const countLabel = count === 0 ? "Nothing picked yet" : count === 1 ? "1 piece picked" : `${count} pieces picked`
 
   return (
     <div
@@ -112,6 +127,48 @@ export default function MustIncludeSheet({ open, picked, roomType, onChange, onC
             <p className="mt-2 text-[13px] leading-normal text-ks-stone">
               Your living and dining room always gets a dining table.
             </p>
+          )}
+
+          <h3 className="mb-2.5 mt-6 text-[13px] font-semibold leading-normal text-ks-stone">A piece you love</h3>
+          {piece ? (
+            <div className="flex items-center gap-3 rounded-2xl border border-ks-line bg-ks-paper p-3">
+              <img src={piece.imageUrl} alt="" className="h-14 w-14 flex-shrink-0 rounded-xl object-cover" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[15px] font-semibold leading-snug text-ks-ink">{pieceLabel(piece)}</p>
+                <p className="text-[13px] leading-snug text-ks-stone">Goes into your next design</p>
+              </div>
+              <button
+                type="button"
+                onClick={onAddPiece}
+                className="flex min-h-[44px] items-center px-1 text-[14px] font-medium text-ks-charcoal underline underline-offset-4"
+              >
+                Change
+              </button>
+              <button
+                type="button"
+                onClick={onRemovePiece}
+                aria-label={`Remove ${pieceLabel(piece)}`}
+                className="flex h-10 w-10 items-center justify-center rounded-full text-ks-stone hover:bg-white"
+              >
+                <X className="h-4 w-4" strokeWidth={2.2} aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onAddPiece}
+              className="flex w-full items-center gap-3.5 rounded-2xl border border-dashed border-[#9CA3AF] bg-ks-paper p-4 text-left outline-none transition-colors duration-150 hover:border-ks-charcoal focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+            >
+              <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-ks-sand text-ks-charcoal">
+                <Camera className="h-[22px] w-[22px]" strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[15px] font-semibold leading-snug text-ks-ink">Add a photo of a piece</span>
+                <span className="text-[13px] leading-snug text-ks-stone">
+                  In a shop, at a friend&apos;s home, or a screenshot. One piece per design.
+                </span>
+              </span>
+            </button>
           )}
         </div>
 

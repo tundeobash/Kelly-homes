@@ -149,7 +149,7 @@ describe("must include: the check after each design", () => {
         { id: "tv-unit", label: "TV unit", included: false },
         { id: "armchair", label: "Armchair", included: true },
       ]),
-      "We couldn't fit the desk and TV unit this time."
+      "We couldn't fit the desk and the TV unit this time."
     )
     assert.equal(missingMessage([{ id: "desk", label: "Desk", included: null }]), "")
   })

@@ -2,6 +2,8 @@ import { existsSync } from "fs"
 import { join } from "path"
 import { readMustIncludeResults } from "@/lib/design/mustInclude"
 import type { MustIncludeResult } from "@/lib/design/mustInclude"
+import { cleanPiece, cleanPieceMode } from "@/lib/design/pieces"
+import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
 
 // TODO: Placeholder restored after recovery
 export interface AiDesignImage {
@@ -14,6 +16,11 @@ export interface AiDesignImage {
   sourceImageUrl?: string | null
   /** Must-have pieces and whether each made it in (saved from 28 Oct 2026). */
   mustInclude?: MustIncludeResult[]
+  /** A piece the person loves, how it was used, and whether it made it in (from 29 Oct 2026). */
+  piece?: StudioPiece | null
+  pieceMode?: PieceMode | null
+  pieceIncluded?: boolean | null
+  baseDesignId?: string | null
 }
 
 export interface NormalizedProject {
@@ -75,6 +82,10 @@ export function normalizeProject(project: any): NormalizedProject {
       createdAt: d.createdAt,
       sourceImageUrl: typeof d.sourceImageUrl === "string" ? d.sourceImageUrl : null,
       mustInclude: readMustIncludeResults(d.mustInclude),
+      piece: cleanPiece(d.piece),
+      pieceMode: cleanPieceMode(d.pieceMode),
+      pieceIncluded: typeof d.pieceIncluded === "boolean" ? d.pieceIncluded : null,
+      baseDesignId: typeof d.baseDesignId === "string" ? d.baseDesignId : null,
     }))
     .filter((d: AiDesignImage) => {
       // Must have id and imageUrl

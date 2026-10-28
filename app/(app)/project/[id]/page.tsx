@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { normalizeProject } from "@/lib/api/normalize-project"
 import DesignStudio from "@/components/design/DesignStudio"
 import { cleanMustInclude } from "@/lib/design/mustInclude"
+import { piecesForRoom } from "@/lib/design/pieces"
 
 type PageProps = {
   params: Promise<{ id: string }>
@@ -35,6 +36,7 @@ export default async function ProjectPage({ params }: PageProps) {
         roomType: normalized.roomType || "",
         imageUrl: normalized.imageUrl || null,
         mustInclude: cleanMustInclude(normalized.lastAiSettings?.mustInclude),
+        pieces: piecesForRoom(normalized.lastAiSettings, (project.aiDesignsJson as unknown[]) || []),
         designs: normalized.aiDesigns.map((design) => ({
           id: design.id,
           imageUrl: design.imageUrl,
@@ -42,6 +44,10 @@ export default async function ProjectPage({ params }: PageProps) {
           createdAt: design.createdAt ?? null,
           sourceImageUrl: design.sourceImageUrl ?? null,
           mustInclude: design.mustInclude ?? [],
+          piece: design.piece ?? null,
+          pieceMode: design.pieceMode ?? null,
+          pieceIncluded: design.pieceIncluded ?? null,
+          baseDesignId: design.baseDesignId ?? null,
         })),
       }}
     />

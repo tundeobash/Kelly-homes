@@ -101,3 +101,23 @@ table, desk, TV unit, armchair, storage, bookshelf, floor seating). A new
   picture cannot show that it folds out.
 - **Next:** a photo of a piece you love (item 4), after the 28 Oct fidelity test
   passed (6 of 6 pieces recognisably the same).
+
+## 2026-10-29 — Pieces you love
+
+**Decision:** people can add a photo of one piece they like (in a shop, at a
+friend's home, a screenshot) and either build a new design around it or add it
+to a design they already have. Under the piece, "Get a quote from a local maker"
+sends us the piece and the design (hand-run maker pilot).
+
+- **Why:** Ayo's idea, 28 Oct; the fidelity test passed (6 of 6 pieces
+  recognisably the same, the room kept in 12 of 12 renders).
+- **How it works:** the person taps the piece; Gemini names it, describes it and
+  finds its box. Only the cropped piece is stored (Vercel Blob), listed on the
+  room for reuse and deleted with the room. The piece goes to OpenAI as a second
+  image. Adding to an existing design edits that design and tells the model to
+  change nothing else. The check is asked whether the piece is visible.
+- **Ayo's choices, 28 Oct:** both modes; keep the piece photos with the room;
+  include the maker quote link (email until a WhatsApp number is set in
+  lib/landing.ts).
+- **Limits:** one piece per design. Modular pieces may take the old piece's
+  layout; sizes are a guess unless a width is given.

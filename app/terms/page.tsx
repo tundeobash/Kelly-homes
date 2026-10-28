@@ -23,9 +23,9 @@ const sections = [
   {
     title: "4. Your photos and designs",
     body: [
-      "Kelly Spaces is in private preview. When you add a room, your photo is used to design that room. To make and check each design, the photo is sent to our AI providers, OpenAI and Google.",
+      "Kelly Spaces is in private preview. When you add a room, your photo is used to design that room. When you add a photo of a piece you like, it is used to find that piece and put it into your design; only the part showing the piece is kept. To make and check each design, these photos are sent to our AI providers, OpenAI and Google.",
       "Your photos and designs are stored so you can come back to them. They are kept at web addresses that are hard to guess but not password-protected: anyone with a picture's exact address could open it, so leave out anything private when you take a photo. We do not show your photos or designs to other users.",
-      "Deleting a room deletes its photo and designs.",
+      "Deleting a room deletes its photo, its pieces and its designs.",
       "We record how the app is used, for example when a design is made or compared, to improve Kelly Spaces.",
     ],
   },

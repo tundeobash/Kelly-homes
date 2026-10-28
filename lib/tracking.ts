@@ -9,6 +9,8 @@ export const TRACKED_EVENTS = [
   "compare_opened",
   "fullscreen_opened",
   "try_another_style",
+  "piece_added", // saved a photo of a piece they love (29 Oct 2026)
+  "maker_quote_opened", // tapped "Get a quote from a local maker"
 ] as const
 
 export type TrackedEvent = (typeof TRACKED_EVENTS)[number]

@@ -5,6 +5,8 @@ import {
 } from "@/lib/ai/generationValidation"
 import { getRoomGuide, normalizeRoomType } from "@/lib/ai/roomFurnishing"
 import { mustIncludeInstruction } from "@/lib/design/mustInclude"
+import { aroundPieceLines } from "@/lib/design/pieces"
+import type { StudioPiece } from "@/lib/design/pieces"
 import { sanitizeProviderError } from "@/lib/ai/stabilityRenderer"
 import { styleCardText } from "@/lib/stylePrompts"
 import type { StyleCard } from "@/lib/stylePrompts"
@@ -55,6 +57,8 @@ export function buildOpenAIEditInstruction(params: {
   moreFurniture?: boolean
   /** Must-have piece ids (lib/design/mustInclude.ts). */
   mustInclude?: string[]
+  /** A piece the customer loves, sent as the second image (lib/design/pieces.ts). */
+  piece?: StudioPiece | null
 }): string {
   const normalized = normalizeRoomType(params.roomType)
   const known = normalized !== "" && normalized !== "other"
@@ -63,6 +67,7 @@ export function buildOpenAIEditInstruction(params: {
   const customerRequest = (params.userPrompt || "").trim().slice(0, MAX_CUSTOMER_REQUEST_CHARS)
 
   const lines = [
+    params.piece ? "The first image is the room to edit." : "",
     `Edit this photo of a room: furnish it as a ${roomLabel} in ${params.style.name} style.`,
     "Keep the room exactly as it is: the same walls, windows, doors and doorways, ceiling, floor and mouldings, the same camera position and lens, and the same daylight.",
     "Do not add, remove, move or resize any window, door, doorway or wall.",
@@ -72,6 +77,7 @@ export function buildOpenAIEditInstruction(params: {
     "Only add furniture, rugs, curtains, lamps, light fittings and decor.",
     known ? `Layout: ${guide.layout}` : "",
     mustIncludeInstruction(params.mustInclude || []),
+    params.piece ? aroundPieceLines(params.piece) : "",
     params.moreFurniture ? "Furnish generously: include at least six pieces of furniture and decor." : "",
     `${params.style.name} style. ${styleCardText(params.style)} Avoid: ${params.style.avoid}.`,
     customerRequest ? `The customer also asked for: ${customerRequest}` : "",
@@ -86,6 +92,8 @@ export function buildOpenAIEditForm(params: {
   prompt: string
   model: string
   quality: string
+  /** More pictures after the room, e.g. a piece the customer loves. */
+  extraImages?: Array<{ buffer: Buffer; mimeType: string }>
 }): FormData {
   const form = new FormData()
   const extension = params.mimeType === "image/jpeg" ? "jpg" : "png"
@@ -95,6 +103,10 @@ export function buildOpenAIEditForm(params: {
     new Blob([new Uint8Array(params.imageBuffer)], { type: params.mimeType }),
     `room.${extension}`
   )
+  ;(params.extraImages || []).forEach((image, index) => {
+    const ext = image.mimeType === "image/jpeg" ? "jpg" : "png"
+    form.append("image[]", new Blob([new Uint8Array(image.buffer)], { type: image.mimeType }), `piece-${index + 1}.${ext}`)
+  })
   form.append("prompt", params.prompt)
   // "auto" keeps the photo's proportions.
   form.append("size", "auto")
@@ -137,6 +149,7 @@ export async function renderWithOpenAI(params: {
   requestId?: string
   apiKey?: string
   fetchImpl?: typeof fetch
+  extraImages?: Array<{ buffer: Buffer; mimeType: string }>
 }): Promise<{ buffer: Buffer; model: string; costUsd: number | null }> {
   const stage = "render"
   const requestLabel = params.requestId || "unknown"
@@ -156,6 +169,7 @@ export async function renderWithOpenAI(params: {
     prompt: params.prompt,
     model,
     quality,
+    extraImages: params.extraImages,
   })
 
   console.log(`[OPENAI] [${requestLabel}] Sending edit request`, {

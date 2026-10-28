@@ -162,11 +162,17 @@ function joinNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 }
 
-/** "We couldn't fit the dining table this time." or "" when nothing is missing. */
-export function missingMessage(results: MustIncludeResult[]): string {
-  const missing = results.filter((r) => r.included === false).map((r) => r.label.toLowerCase().replace(/^tv /, "TV "))
+/**
+ * "We couldn't fit the dining table this time." or "" when nothing is missing.
+ * extra: other things that did not fit, already worded, e.g. "your round fabric pouf".
+ */
+export function missingMessage(results: MustIncludeResult[], extra: string[] = []): string {
+  const missing = results
+    .filter((r) => r.included === false)
+    .map((r) => `the ${r.label.toLowerCase().replace(/^tv /, "TV ")}`)
+    .concat(extra)
   if (missing.length === 0) return ""
-  return `We couldn't fit the ${joinNames(missing)} this time.`
+  return `We couldn't fit ${joinNames(missing)} this time.`
 }
 
 /** The person's own picks behind a design's results (a living and dining room's dining table is automatic). */

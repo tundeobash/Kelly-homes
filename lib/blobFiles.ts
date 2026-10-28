@@ -14,8 +14,10 @@ export function isBlobUrl(value: unknown): value is string {
   }
 }
 
-/** The room's photo, every design, and the photo each design was made from. */
-export function roomBlobUrls(room: { imageUrl?: string | null; aiDesignsJson?: unknown }): string[] {
+type RoomFiles = { imageUrl?: string | null; aiDesignsJson?: unknown; lastAiSettings?: unknown }
+
+/** The room's photo, every design, the photo each design was made from, and the room's pieces. */
+export function roomBlobUrls(room: RoomFiles): string[] {
   const urls: string[] = []
   const add = (value: unknown) => {
     if (isBlobUrl(value) && urls.indexOf(value) === -1) urls.push(value)
@@ -27,16 +29,19 @@ export function roomBlobUrls(room: { imageUrl?: string | null; aiDesignsJson?: u
       const d = design as Record<string, unknown>
       add(d.imageUrl)
       add(d.sourceImageUrl)
+      if (d.piece && typeof d.piece === "object") add((d.piece as Record<string, unknown>).imageUrl)
     }
+  }
+  const settings = room.lastAiSettings && typeof room.lastAiSettings === "object" ? (room.lastAiSettings as Record<string, unknown>) : null
+  const pieces = settings && Array.isArray(settings.pieces) ? settings.pieces : []
+  for (const piece of pieces) {
+    if (piece && typeof piece === "object") add((piece as Record<string, unknown>).imageUrl)
   }
   return urls
 }
 
 /** The room's files that none of the person's other rooms still show. */
-export function filesOnlyThisRoomUses(
-  room: { imageUrl?: string | null; aiDesignsJson?: unknown },
-  otherRooms: { imageUrl?: string | null; aiDesignsJson?: unknown }[]
-): string[] {
+export function filesOnlyThisRoomUses(room: RoomFiles, otherRooms: RoomFiles[]): string[] {
   const keep = new Set<string>()
   for (const other of otherRooms) for (const url of roomBlobUrls(other)) keep.add(url)
   return roomBlobUrls(room).filter((url) => !keep.has(url))
