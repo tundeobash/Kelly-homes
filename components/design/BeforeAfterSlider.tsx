@@ -11,6 +11,9 @@ interface BeforeAfterSliderProps {
   afterAlt: string
   /** Called once, the first time the slider is moved. */
   onFirstMove?: () => void
+  /** Corner labels: "Before"/"After", or "Previous"/"New" for a changed piece. */
+  beforeLabel?: string
+  afterLabel?: string
 }
 
 /**
@@ -23,6 +26,8 @@ export default function BeforeAfterSlider({
   afterSrc,
   afterAlt,
   onFirstMove,
+  beforeLabel = "Before",
+  afterLabel = "After",
 }: BeforeAfterSliderProps) {
   const [pos, setPos] = useState(50)
   const [touched, setTouched] = useState(false)
@@ -121,11 +126,11 @@ export default function BeforeAfterSlider({
           <div
             role="slider"
             tabIndex={0}
-            aria-label="Compare before and after"
+            aria-label={`Compare ${beforeLabel.toLowerCase()} and ${afterLabel.toLowerCase()}`}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(pos)}
-            aria-valuetext={`${Math.round(pos)}% before photo`}
+            aria-valuetext={`${Math.round(pos)}% ${beforeLabel.toLowerCase()}`}
             onKeyDown={onKeyDown}
             className="absolute top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white text-ks-charcoal shadow-[0_2px_10px_rgba(17,24,39,0.25)] outline-none focus-visible:ring-2 focus-visible:ring-ks-gold"
             style={{ left: `${pos}%` }}
@@ -133,16 +138,16 @@ export default function BeforeAfterSlider({
             <ChevronsLeftRight className="h-5 w-5" aria-hidden="true" />
           </div>
           <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-[rgba(17,24,39,0.72)] px-2.5 py-1.5 text-[12px] font-medium leading-none text-white">
-            Before
+            {beforeLabel}
           </span>
           <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-[rgba(17,24,39,0.72)] px-2.5 py-1.5 text-[12px] font-medium leading-none text-white">
-            After
+            {afterLabel}
           </span>
           {!touched && (
             <div className="pointer-events-none absolute inset-x-0 bottom-3.5 flex justify-center">
               <span className="flex items-center gap-1.5 rounded-full bg-[rgba(17,24,39,0.78)] px-3 py-2 text-[13px] font-medium leading-none text-white">
                 <ChevronsLeftRight className="h-4 w-4" aria-hidden="true" />
-                Drag to see before and after
+                Drag to see {beforeLabel.toLowerCase()} and {afterLabel.toLowerCase()}
               </span>
             </div>
           )}

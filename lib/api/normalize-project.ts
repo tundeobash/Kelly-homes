@@ -4,6 +4,8 @@ import { readMustIncludeResults } from "@/lib/design/mustInclude"
 import type { MustIncludeResult } from "@/lib/design/mustInclude"
 import { cleanPiece, cleanPieceMode } from "@/lib/design/pieces"
 import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
+import { readDesignEdit, readDetected } from "@/lib/design/pieceEdit"
+import type { DesignEdit, DetectedPiece } from "@/lib/design/pieceEdit"
 
 // TODO: Placeholder restored after recovery
 export interface AiDesignImage {
@@ -21,6 +23,10 @@ export interface AiDesignImage {
   pieceMode?: PieceMode | null
   pieceIncluded?: boolean | null
   baseDesignId?: string | null
+  /** A swapped, moved or removed piece (from 29 Oct 2026). */
+  edit?: DesignEdit | null
+  /** Pieces found for "Change a piece", once looked for. */
+  detected?: DetectedPiece[] | null
 }
 
 export interface NormalizedProject {
@@ -36,6 +42,8 @@ export interface NormalizedProject {
     userPrompt?: string
     /** Must-have piece ids picked for the latest design. */
     mustInclude?: string[]
+    /** The room's budget band (lib/design/budget.ts). */
+    budget?: string | null
     updatedAt: string
   } | null
   coverImageUrl: string | null
@@ -86,6 +94,8 @@ export function normalizeProject(project: any): NormalizedProject {
       pieceMode: cleanPieceMode(d.pieceMode),
       pieceIncluded: typeof d.pieceIncluded === "boolean" ? d.pieceIncluded : null,
       baseDesignId: typeof d.baseDesignId === "string" ? d.baseDesignId : null,
+      edit: readDesignEdit(d.edit),
+      detected: readDetected(d.detectedPieces),
     }))
     .filter((d: AiDesignImage) => {
       // Must have id and imageUrl

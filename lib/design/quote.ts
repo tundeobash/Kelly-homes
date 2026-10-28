@@ -39,6 +39,8 @@ export interface QuoteRequest {
   items: QuoteItem[]
   /** Anything else the person typed. */
   other: string
+  /** The room's budget line (lib/design/budget.ts budgetQuoteLine), when one was picked. */
+  budget?: string | null
 }
 
 /** A request can be sent for the whole room, or when at least one piece is ticked or named. */
@@ -50,6 +52,7 @@ export function canSendQuote(request: Pick<QuoteRequest, "wholeRoom" | "items" |
 export function quoteMessage(request: QuoteRequest): string {
   const other = request.other.replace(/\s+/g, " ").trim().slice(0, 300)
   const lines = [`Hello, I'd like a quote to make my design real.`, `Room: ${request.roomName.trim() || "My room"} (${request.styleName})`]
+  if (request.budget) lines.push(request.budget)
   if (request.wholeRoom) {
     lines.push("Quote for: the whole room")
     if (other) lines.push(`Notes: ${other}`)

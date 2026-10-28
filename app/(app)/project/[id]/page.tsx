@@ -6,6 +6,7 @@ import { normalizeProject } from "@/lib/api/normalize-project"
 import DesignStudio from "@/components/design/DesignStudio"
 import { cleanMustInclude } from "@/lib/design/mustInclude"
 import { piecesForRoom } from "@/lib/design/pieces"
+import { cleanBudget } from "@/lib/design/budget"
 
 type PageProps = {
   params: Promise<{ id: string }>
@@ -37,6 +38,7 @@ export default async function ProjectPage({ params }: PageProps) {
         imageUrl: normalized.imageUrl || null,
         mustInclude: cleanMustInclude(normalized.lastAiSettings?.mustInclude),
         pieces: piecesForRoom(normalized.lastAiSettings, (project.aiDesignsJson as unknown[]) || []),
+        budget: cleanBudget(normalized.lastAiSettings?.budget),
         designs: normalized.aiDesigns.map((design) => ({
           id: design.id,
           imageUrl: design.imageUrl,
@@ -48,6 +50,8 @@ export default async function ProjectPage({ params }: PageProps) {
           pieceMode: design.pieceMode ?? null,
           pieceIncluded: design.pieceIncluded ?? null,
           baseDesignId: design.baseDesignId ?? null,
+          edit: design.edit ?? null,
+          detected: design.detected ?? null,
         })),
       }}
     />

@@ -505,6 +505,21 @@ export function assessRoomOutput(
   return { passed: true, reason: `The result is a furnished ${guide.label}.` }
 }
 
+/**
+ * A change to one piece of a design that was already furnished (swap, move, remove).
+ * Only an empty result is refused: removing the sofa from a living room is allowed.
+ */
+export function assessEditOutput(inspection: RoomInspection): { passed: boolean; reason: string } {
+  const described = [inspection.furniture.join(" "), inspection.notes].join(" ").toLowerCase()
+  const saysEmpty =
+    inspection.empty ||
+    inspection.furniture.length === 0 ||
+    EMPTY_PHRASES.some((phrase) => described.includes(phrase))
+  return saysEmpty
+    ? { passed: false, reason: "The result looks like an empty room with no major furniture, so it was not saved." }
+    : { passed: true, reason: "The change kept a furnished room." }
+}
+
 export async function inspectGeneratedRoom(params: {
   imageBase64: string
   mimeType?: string

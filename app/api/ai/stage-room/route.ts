@@ -12,6 +12,7 @@ import { createHash } from "crypto"
 import sharp from "sharp"
 import { planRoomDesign, createFallbackPlan, PlannerResult } from "@/lib/ai/geminiPlanner"
 import {
+  assessEditOutput,
   assessRoomOutput,
   buildGenerationPrompts,
   ensureRoomPlan,
@@ -36,6 +37,8 @@ import {
   placePieceInstruction,
   readPieces,
 } from "@/lib/design/pieces"
+import { cleanEditRequest, designEditFrom, editCheckName, editDone, editInstruction } from "@/lib/design/pieceEdit"
+import { markEditImage } from "@/lib/ai/editMarks"
 import { runTwoPassStability } from "@/lib/ai/twoPassGeneration"
 import { decideImageProvider, stageLabel } from "@/lib/ai/generationPolicy"
 import { InvalidImageError, UnchangedImageError, validateGeneratedImage, sha256 } from "@/lib/ai/generationValidation"
@@ -621,10 +624,17 @@ export async function POST(request: Request) {
     const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture, roomType: requestedRoomType } = body
     // Must-have pieces the person picked (at most 3, known ids only).
     const pickedMustInclude = cleanMustInclude(body?.mustInclude)
+    // "Change a piece": swap, move or remove one piece of an existing design (item 7).
+    const edit = cleanEditRequest(body?.edit)
     // A piece the person loves: "around" builds a new design around it; "place" adds it to an existing design.
-    const requestedPiece = cleanPiece(body?.piece)
-    const pieceMode = requestedPiece ? cleanPieceMode(body?.pieceMode) ?? "around" : null
-    const baseDesignId = typeof body?.baseDesignId === "string" ? body.baseDesignId.slice(0, 80) : null
+    // With a swap, the piece replaces the one being changed.
+    const requestedPiece = edit && edit.action !== "swap" ? null : cleanPiece(body?.piece)
+    const pieceMode = requestedPiece && !edit ? cleanPieceMode(body?.pieceMode) ?? "around" : null
+    const baseDesignId = edit
+      ? edit.baseDesignId
+      : typeof body?.baseDesignId === "string"
+        ? body.baseDesignId.slice(0, 80)
+        : null
 
     // Resolve the style card (every style in the app has one)
     const styleKey = (typeof style === "string" ? style : "").toLowerCase()
@@ -800,17 +810,19 @@ export async function POST(request: Request) {
       )
     }
 
-    // The room photo a design is made from. When adding a piece to an existing design,
-    // that design is edited instead, and the before/after still shows the room photo.
+    // The room photo a design is made from. When adding a piece to an existing design, or
+    // changing one of its pieces, that design is edited instead.
     let sourcePhotoUrl: string = imageUrl
-    if (pieceMode === "place") {
+    if (pieceMode === "place" || edit) {
       const designs: any[] = Array.isArray(project?.aiDesignsJson) ? (project.aiDesignsJson as any[]) : []
       const base = designs.find((d) => d && typeof d === "object" && d.id === baseDesignId)
       if (!base || typeof base.imageUrl !== "string" || !isAllowedImageUrl(base.imageUrl)) {
         return NextResponse.json(
           {
             success: false,
-            errorMessage: "That design could not be found. Open it again, then add the piece.",
+            errorMessage: edit
+              ? "That design could not be found. Open it again, then make the change."
+              : "That design could not be found. Open it again, then add the piece.",
             errorCode: "BASE_DESIGN_NOT_FOUND",
             retryable: false,
             requestId,
@@ -828,7 +840,7 @@ export async function POST(request: Request) {
     })
     // What to ask for and check: the picks, plus a dining table for a living and dining room.
     // Adding a piece to an existing design asks for nothing else.
-    const mustIncludeIds = pieceMode === "place" ? [] : piecesToCheck(pickedMustInclude, resolvedRoomType)
+    const mustIncludeIds = pieceMode === "place" || edit ? [] : piecesToCheck(pickedMustInclude, resolvedRoomType)
 
     console.log(`[${requestId}] Room type received`, {
       fromRequest: typeof requestedRoomType === "string" && requestedRoomType.trim()
@@ -899,6 +911,17 @@ export async function POST(request: Request) {
 
     const selectedProvider = providerDecision.provider
     const plannerUsed = providerDecision.planner
+
+    // Changing one piece needs the OpenAI image editor.
+    if (edit && selectedProvider !== "openai") {
+      return NextResponse.json({
+        success: false,
+        errorMessage: "Changing a piece isn't available right now. Please try again later.",
+        errorCode: "EDIT_UNAVAILABLE",
+        retryable: false,
+        requestId,
+      })
+    }
 
     // Daily design limit: record this attempt before any paid work starts.
     const allowance = await reserveDesignAttempt({ userId, provider: selectedProvider, requestId })
@@ -1003,6 +1026,26 @@ export async function POST(request: Request) {
           errorMessage: "We couldn't load your piece's photo. Please add it again.",
           errorCode: "PIECE_LOAD_FAILED",
           retryable: false,
+          requestId,
+          stage: "input",
+        })
+      }
+    }
+
+    // For a change: the design again, with the piece outlined (and a dot for a move).
+    let editMarks: { buffer: Buffer; mimeType: string } | null = null
+    if (edit) {
+      try {
+        editMarks = { buffer: await markEditImage(imageBuffer, edit.target.box, edit.to), mimeType: "image/png" }
+      } catch (error: unknown) {
+        console.error(`[${requestId}] Could not mark the piece`, {
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return NextResponse.json({
+          success: false,
+          errorMessage: "We couldn't prepare this change. Please try again.",
+          errorCode: "EDIT_MARK_FAILED",
+          retryable: true,
           requestId,
           stage: "input",
         })
@@ -1162,8 +1205,9 @@ export async function POST(request: Request) {
         }
       } else if (selectedProvider === "openai") {
         // Default path: one OpenAI image edit, guided by the style card.
-        const instruction =
-          pieceMode === "place" && requestedPiece
+        const instruction = edit
+          ? editInstruction(edit, requestedPiece)
+          : pieceMode === "place" && requestedPiece
             ? placePieceInstruction(requestedPiece)
             : buildOpenAIEditInstruction({
                 roomType: resolvedRoomType,
@@ -1177,7 +1221,8 @@ export async function POST(request: Request) {
           roomType: resolvedRoomType || "unspecified",
           style: styleCard.id,
           mustInclude: mustIncludeIds,
-          piece: requestedPiece ? `${pieceMode}:${requestedPiece.name}` : null,
+          piece: requestedPiece ? `${pieceMode ?? "swap"}:${requestedPiece.name}` : null,
+          edit: edit ? `${edit.action}:${edit.target.name}` : null,
           instructionLength: instruction.length,
         })
         const rendered = await renderWithOpenAI({
@@ -1185,7 +1230,7 @@ export async function POST(request: Request) {
           mimeType: "image/png",
           prompt: instruction,
           requestId,
-          extraImages: pieceImage ? [pieceImage] : undefined,
+          extraImages: [editMarks, pieceImage].filter((x): x is { buffer: Buffer; mimeType: string } => x !== null),
         })
         generatedImageBuffer = rendered.buffer
         actualProviderUsed = "openai"
@@ -1275,6 +1320,9 @@ export async function POST(request: Request) {
     // Whether each must-have piece made it into the design (null when the check does not run).
     let mustIncludeResults = uncheckedMustIncludes(mustIncludeIds)
     let pieceWasIncluded: boolean | null = null
+    // For a change: what the check is asked about, and whether the change happened.
+    const editCheck = edit ? editCheckName(edit, requestedPiece) : null
+    let editWasDone: boolean | null = null
 
     // The furnishing check uses Gemini (text only). Without a Gemini key it is skipped
     // and logged, rather than throwing away a good redesign.
@@ -1290,15 +1338,22 @@ export async function POST(request: Request) {
           imageBase64: generatedImageBuffer.toString("base64"),
           mimeType,
           roomType: resolvedRoomType,
-          mustHaves: [
-            ...mustIncludeIds.map((id) => findMustInclude(id)?.label || id),
-            ...(requestedPiece ? [pieceCheckName(requestedPiece)] : []),
-          ],
+          mustHaves: editCheck
+            ? [editCheck]
+            : [
+                ...mustIncludeIds.map((id) => findMustInclude(id)?.label || id),
+                ...(requestedPiece ? [pieceCheckName(requestedPiece)] : []),
+              ],
           requestId,
         })
-        const furnishing = assessRoomOutput(inspection, resolvedRoomType)
+        // A change may take out the room's main piece (remove the sofa), so only an empty result is refused.
+        const furnishing = edit ? assessEditOutput(inspection) : assessRoomOutput(inspection, resolvedRoomType)
         mustIncludeResults = checkMustIncludes(inspection, mustIncludeIds)
         pieceWasIncluded = requestedPiece ? pieceIncluded(inspection, requestedPiece) : null
+        if (edit && editCheck) {
+          const seen = inspection.mustHave?.[editCheck]
+          editWasDone = editDone(edit.action, typeof seen === "boolean" ? seen : null, Boolean(requestedPiece))
+        }
         console.log(`[${requestId}] Output validation`, {
           roomType: resolvedRoomType || "unspecified",
           passed: furnishing.passed,
@@ -1307,6 +1362,7 @@ export async function POST(request: Request) {
           furnitureCount: inspection.furniture.length,
           mustInclude: mustIncludeResults.map((r) => `${r.id}:${r.included}`),
           piece: requestedPiece ? `${requestedPiece.name}:${pieceWasIncluded}` : null,
+          edit: edit ? `${edit.action}:${editWasDone}` : null,
         })
         if (!furnishing.passed) {
           return NextResponse.json({
@@ -1409,6 +1465,7 @@ export async function POST(request: Request) {
                 ...(pieceMode === "place" && baseDesignId ? { baseDesignId } : {}),
               }
             : {}),
+          ...(edit ? { edit: designEditFrom(edit, requestedPiece, editWasDone), baseDesignId: edit.baseDesignId } : {}),
         }
         savedDesignId = newDesign.id
 
@@ -1418,11 +1475,14 @@ export async function POST(request: Request) {
         // Update lastAiSettings
         const previousPieces = readPieces(previousSettings.pieces)
         const lastAiSettings = {
+          // Keeps anything else the room remembers, such as its budget.
+          ...previousSettings,
           style,
           budgetRange: "any",
-          userPrompt: prompt || null,
-          // Adding a piece to a design keeps the room's Must include picks as they were.
-          mustInclude: pieceMode === "place" ? cleanMustInclude(previousSettings.mustInclude) : pickedMustInclude,
+          userPrompt: edit ? previousSettings.userPrompt ?? null : prompt || null,
+          // Adding a piece to a design, or changing one, keeps the room's Must include picks as they were.
+          mustInclude:
+            pieceMode === "place" || edit ? cleanMustInclude(previousSettings.mustInclude) : pickedMustInclude,
           pieces: requestedPiece ? addPiece(previousPieces, requestedPiece) : previousPieces,
           updatedAt: new Date().toISOString(),
         }
@@ -1464,7 +1524,8 @@ export async function POST(request: Request) {
       piece: requestedPiece,
       pieceMode,
       pieceIncluded: pieceWasIncluded,
-      baseDesignId: pieceMode === "place" ? baseDesignId : null,
+      baseDesignId: pieceMode === "place" || edit ? baseDesignId : null,
+      edit: edit ? designEditFrom(edit, requestedPiece, editWasDone) : null,
       sourceImageUrl: sourcePhotoUrl,
       providerUsed: actualProviderUsed,
       model: actualModel,

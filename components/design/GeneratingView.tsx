@@ -10,9 +10,11 @@ interface GeneratingViewProps {
   roomLabel: string
   roomName: string
   startedAt: number
+  /** Heading instead of "Designing your …", e.g. "Swapping the sofa". */
+  title?: string
 }
 
-export default function GeneratingView({ photoUrl, styleName, roomLabel, roomName, startedAt }: GeneratingViewProps) {
+export default function GeneratingView({ photoUrl, styleName, roomLabel, roomName, startedAt, title }: GeneratingViewProps) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -45,7 +47,7 @@ export default function GeneratingView({ photoUrl, styleName, roomLabel, roomNam
 
       <div className="mt-6 lg:mt-2">
         <h1 className="mb-3.5 font-serif text-[24px] font-semibold leading-tight text-ks-ink">
-          Designing your {roomLabel}
+          {title || `Designing your ${roomLabel}`}
         </h1>
         <div
           role="progressbar"

@@ -1,8 +1,11 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { Check, ChevronRight, ImagePlus, Loader2, Plus, Sofa, X } from "lucide-react"
+import { Check, ChevronRight, ImagePlus, Loader2, Plus, Sofa, Wallet, X } from "lucide-react"
 import MustIncludeSheet from "@/components/design/MustIncludeSheet"
+import BudgetSheet from "@/components/design/BudgetSheet"
+import { budgetSummary } from "@/lib/design/budget"
+import type { BudgetTier } from "@/lib/design/budget"
 import { findMustInclude } from "@/lib/design/mustInclude"
 import { pieceLabel } from "@/lib/design/pieces"
 import type { StudioPiece } from "@/lib/design/pieces"
@@ -27,6 +30,9 @@ interface StylePickerProps {
   piece: StudioPiece | null
   onAddPiece: () => void
   onRemovePiece: () => void
+  /** The room's budget band (optional); it goes into the quote, not the design. */
+  budget: BudgetTier | null
+  onBudgetChange: (tier: BudgetTier) => void
 }
 
 const gulfStyles = STUDIO_STYLES.filter((style) => style.gulf)
@@ -89,10 +95,13 @@ export default function StylePicker({
   piece,
   onAddPiece,
   onRemovePiece,
+  budget,
+  onBudgetChange,
 }: StylePickerProps) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [noteOpen, setNoteOpen] = useState(note.trim().length > 0)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [budgetOpen, setBudgetOpen] = useState(false)
   const pickedStyle = STUDIO_STYLES.find((style) => style.id === picked) ?? null
   const canDesign = Boolean(photoUrl) && Boolean(pickedStyle) && !uploading
 
@@ -285,6 +294,20 @@ export default function StylePicker({
         )}
         <button
           type="button"
+          onClick={() => setBudgetOpen(true)}
+          className="mt-2 flex min-h-[56px] w-full items-center gap-3 rounded-xl border border-ks-line bg-ks-paper px-3 py-2 text-left outline-none transition-colors duration-150 hover:border-ks-charcoal focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+        >
+          <span className="flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-[10px] bg-ks-sand text-ks-charcoal">
+            <Wallet className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="text-[15px] font-semibold leading-snug text-ks-ink">Budget</span>
+            <span className="truncate text-[13px] leading-snug text-ks-stone">{budgetSummary(roomType, budget)}</span>
+          </span>
+          <ChevronRight className="h-[18px] w-[18px] flex-shrink-0 text-ks-stone" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
           onClick={onDesign}
           disabled={!canDesign}
           className="mt-2.5 flex h-[52px] w-full items-center justify-center rounded-xl bg-ks-charcoal text-[16px] font-semibold text-white transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -302,6 +325,13 @@ export default function StylePicker({
         piece={piece}
         onAddPiece={onAddPiece}
         onRemovePiece={onRemovePiece}
+      />
+      <BudgetSheet
+        open={budgetOpen}
+        roomType={roomType}
+        value={budget}
+        onChange={onBudgetChange}
+        onClose={() => setBudgetOpen(false)}
       />
     </div>
   )

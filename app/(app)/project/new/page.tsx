@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ChevronLeft, ImagePlus, Loader2 } from "lucide-react"
+import { Camera, Check, ChevronLeft, ImagePlus, Loader2, X } from "lucide-react"
 import { ROOM_TYPE_OPTIONS, defaultRoomName } from "@/lib/rooms"
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024
@@ -13,6 +13,8 @@ const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"]
 export default function AddRoomPage() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
+  // Opens the camera straight away on a phone (a file picker elsewhere).
+  const cameraRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [name, setName] = useState("")
@@ -96,6 +98,17 @@ export default function AddRoomPage() {
           e.target.value = ""
         }}
       />
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          choosePhoto(e.target.files?.[0])
+          e.target.value = ""
+        }}
+      />
 
       {preview ? (
         <div className="mt-5 flex items-start gap-3.5">
@@ -103,7 +116,7 @@ export default function AddRoomPage() {
           <div className="flex flex-col gap-2.5 pt-0.5">
             <p className="text-[15px] font-semibold text-ks-ink">Your photo</p>
             <ul className="list-disc pl-[18px] text-[14px] leading-relaxed text-ks-stone">
-              <li className="text-[14px] text-ks-stone">Stand in a corner</li>
+              <li className="text-[14px] text-ks-stone">Get the whole room in (0.5× helps)</li>
               <li className="text-[14px] text-ks-stone">Hold your phone upright</li>
               <li className="text-[14px] text-ks-stone">Turn the lights on</li>
             </ul>
@@ -118,17 +131,81 @@ export default function AddRoomPage() {
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="mt-5 flex flex-col items-center rounded-2xl border border-dashed border-[#9CA3AF] bg-white px-6 py-9 text-center outline-none focus-visible:ring-2 focus-visible:ring-ks-charcoal"
-        >
-          <ImagePlus className="h-8 w-8 text-ks-charcoal" aria-hidden="true" />
-          <span className="mt-3 text-[16px] font-semibold text-ks-ink">Take or choose a photo</span>
-          <span className="mt-1 text-[14px] leading-normal text-ks-stone">
-            Stand in a corner, hold your phone upright, and turn the lights on.
-          </span>
-        </button>
+        <section className="mt-5 rounded-2xl border border-ks-line bg-white p-4">
+          <p className="text-[16px] font-semibold leading-snug text-ks-ink">Take a photo of your room</p>
+          <p className="mt-0.5 text-[14px] leading-normal text-ks-stone">
+            Get in as much of the room as you can. The more we see, the better the design.
+          </p>
+          <div className="mt-3.5 grid grid-cols-2 gap-3">
+            <figure>
+              <div className="relative aspect-[3/4] overflow-hidden rounded-xl border-2 border-transparent">
+                <img
+                  src="/images/tips/room-1x.jpg"
+                  alt="A room photographed at 1x: only the middle of the room fits"
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute left-2 top-2 rounded-full bg-[rgba(17,24,39,0.75)] px-2 py-1 text-[13px] font-semibold leading-none text-white">
+                  1×
+                </span>
+              </div>
+              <figcaption className="mt-1.5 flex items-center gap-1.5 text-[13px] leading-snug text-[#4B5563]">
+                <X className="h-4 w-4 flex-shrink-0 text-ks-stone" strokeWidth={2.2} aria-hidden="true" />
+                Only part of the room
+              </figcaption>
+            </figure>
+            <figure>
+              <div className="relative aspect-[3/4] overflow-hidden rounded-xl border-2 border-ks-gold">
+                <img
+                  src="/images/tips/room-wide.jpg"
+                  alt="The same room at 0.5x: the whole room fits"
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute left-2 top-2 rounded-full bg-ks-gold px-2 py-1 text-[13px] font-semibold leading-none text-ks-ink">
+                  0.5×
+                </span>
+              </div>
+              <figcaption className="mt-1.5 flex items-center gap-1.5 text-[13px] font-medium leading-snug text-ks-ink">
+                <Check className="h-4 w-4 flex-shrink-0 text-ks-charcoal" strokeWidth={2.4} aria-hidden="true" />
+                The whole room
+              </figcaption>
+            </figure>
+          </div>
+          <ol className="mt-4 flex flex-col gap-2.5">
+            {[
+              "Stand in a corner or a doorway, facing into the room.",
+              "If your camera has 0.5×, tap it. Some phones show 0.6×.",
+              "Hold the phone upright at chest height, with the lights on.",
+            ].map((tip, index) => (
+              <li key={tip} className="flex items-start gap-3">
+                <span
+                  aria-hidden="true"
+                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-ks-sand text-[13px] font-semibold text-ks-charcoal"
+                >
+                  {index + 1}
+                </span>
+                <span className="pt-0.5 text-[14px] leading-snug text-ks-ink">{tip}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => cameraRef.current?.click()}
+              className="flex h-[52px] items-center justify-center gap-2 rounded-xl bg-ks-charcoal text-[16px] font-semibold text-white outline-none transition-opacity duration-150 hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ks-charcoal focus-visible:ring-offset-2"
+            >
+              <Camera className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+              Take a photo
+            </button>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="flex h-[52px] items-center justify-center gap-2 rounded-xl border border-ks-charcoal bg-white text-[16px] font-semibold text-ks-charcoal outline-none transition-colors duration-150 hover:bg-ks-paper focus-visible:ring-2 focus-visible:ring-ks-charcoal focus-visible:ring-offset-2"
+            >
+              <ImagePlus className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+              Choose from your photos
+            </button>
+          </div>
+        </section>
       )}
 
       <label htmlFor="room-name" className="mt-6 text-[14px] font-semibold text-ks-ink">

@@ -104,6 +104,7 @@ describe("design replies", () => {
       pieceMode: null,
       pieceIncluded: null,
       baseDesignId: null,
+      edit: null,
     })
   })
 

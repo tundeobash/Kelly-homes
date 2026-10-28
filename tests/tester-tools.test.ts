@@ -69,6 +69,11 @@ describe("tracking", () => {
       "quote_opened",
       "quote_room_sent",
       "quote_pieces_sent",
+      "budget_set",
+      "change_opened",
+      "piece_swapped",
+      "piece_moved",
+      "piece_removed",
     ])
     assert.equal(isTrackedEvent("compare_opened"), true)
     assert.equal(isTrackedEvent("drop table"), false)

@@ -15,11 +15,13 @@ interface QuoteSheetProps {
   projectId: string
   /** Open with this item ticked and "Specific pieces" chosen, e.g. "piece:<id>". */
   preselect?: string | null
+  /** The room's budget line for the request (lib/design/budget.ts), if one was picked. */
+  budgetLine?: string | null
   onClose: () => void
 }
 
 /** "Get a quote": the whole room, or chosen pieces. Sends one message to us. */
-export default function QuoteSheet({ open, design, roomName, styleName, projectId, preselect, onClose }: QuoteSheetProps) {
+export default function QuoteSheet({ open, design, roomName, styleName, projectId, preselect, budgetLine, onClose }: QuoteSheetProps) {
   const [wholeRoom, setWholeRoom] = useState(true)
   const [ticked, setTicked] = useState<string[]>([])
   const [other, setOther] = useState("")
@@ -43,7 +45,7 @@ export default function QuoteSheet({ open, design, roomName, styleName, projectI
 
   const items = quoteItemsFor(design)
   const chosen = items.filter((item) => ticked.includes(item.id))
-  const request = { roomName, styleName, designUrl: design.imageUrl, wholeRoom, items: chosen, other }
+  const request = { roomName, styleName, designUrl: design.imageUrl, wholeRoom, items: chosen, other, budget: budgetLine ?? null }
   const ready = canSendQuote(request)
   const link = ready ? quoteRequestLink(quoteMessage(request)) : null
 
@@ -106,6 +108,7 @@ export default function QuoteSheet({ open, design, roomName, styleName, projectI
               Prices from local makers and shops to make this {styleName} design real.
             </p>
           </div>
+          {budgetLine && <p className="mt-2.5 text-[13px] font-medium leading-snug text-ks-charcoal">{budgetLine}</p>}
 
           <h3 className="mb-2.5 mt-5 text-[13px] font-semibold leading-normal text-ks-stone">What would you like a quote for?</h3>
           <div role="radiogroup" aria-label="What would you like a quote for?" className="flex flex-col gap-2">
@@ -146,7 +149,7 @@ export default function QuoteSheet({ open, design, roomName, styleName, projectI
             value={other}
             maxLength={300}
             onChange={(e) => setOther(e.target.value)}
-            placeholder={wholeRoom ? "For example: budget, or when you move in" : "For example: the rug and the TV unit"}
+            placeholder={wholeRoom ? "For example: when you move in" : "For example: the rug and the TV unit"}
             className="mt-1.5 h-12 w-full rounded-xl border border-[#D1D5DB] bg-white px-3.5 text-[16px] text-ks-ink outline-none focus:border-ks-charcoal"
           />
         </div>

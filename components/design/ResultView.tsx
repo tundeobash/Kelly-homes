@@ -1,7 +1,11 @@
 "use client"
 
-import { AlertCircle, Check, ChevronRight, Dot, Plus, Receipt } from "lucide-react"
+import { useState } from "react"
+import { AlertCircle, ArrowLeftRight, Check, ChevronRight, Dot, Plus, Receipt, Undo2, Wallet } from "lucide-react"
 import BeforeAfterSlider from "@/components/design/BeforeAfterSlider"
+import { BUDGET_TIERS, budgetLabel, budgetPrice, hasBudgetBands } from "@/lib/design/budget"
+import type { BudgetTier } from "@/lib/design/budget"
+import { editDetail, editHeadline, editMissedMessage } from "@/lib/design/pieceEdit"
 import { missingMessage } from "@/lib/design/mustInclude"
 import { contactLinks } from "@/lib/landing"
 import { pieceLabel } from "@/lib/design/pieces"
@@ -12,6 +16,10 @@ import type { StudioDesign } from "@/lib/design/studioFlow"
 interface ResultViewProps {
   design: StudioDesign
   beforeSrc: string | null
+  /** "Before" (room photo) or "Previous" (the design a changed piece was made from). */
+  beforeLabel?: "Before" | "Previous"
+  /** The design a changed piece was made from, while it is still kept. */
+  previousId?: string | null
   styleName: string
   number: number
   total: number
@@ -26,11 +34,23 @@ interface ResultViewProps {
   onAddPiece?: () => void
   /** Opens "Get a quote", optionally with one item ticked (e.g. "piece:<id>"). */
   onQuote?: (preselect?: string) => void
+  /** The room's budget band; changing it does not change the design. */
+  roomType: string
+  budget: BudgetTier | null
+  onBudgetChange?: (tier: BudgetTier) => void
+  /** Opens "Change a piece". */
+  onChangePiece?: () => void
+  /** Shows another of the room's designs, e.g. the previous one. */
+  onShowDesign?: (id: string) => void
+  /** Repeats a change that did not work, when it can be repeated. */
+  onRetryEdit?: () => void
 }
 
 export default function ResultView({
   design,
   beforeSrc,
+  beforeLabel = "Before",
+  previousId = null,
   styleName,
   number,
   total,
@@ -42,7 +62,17 @@ export default function ResultView({
   onRetryMissing,
   onAddPiece,
   onQuote,
+  roomType,
+  budget,
+  onBudgetChange,
+  onChangePiece,
+  onShowDesign,
+  onRetryEdit,
 }: ResultViewProps) {
+  const [budgetOpen, setBudgetOpen] = useState(false)
+  const edit = design.edit ?? null
+  const editMissed = edit ? editMissedMessage(edit) : null
+  const budgetPriceLine = budget && budget !== "unsure" && hasBudgetBands(roomType) ? `${budgetPrice(roomType, budget)} for this room` : budget === "unsure" ? "Your quote shows options at each budget" : budget ? "Priced in your quote" : "Optional. It helps us price your quote."
   const feedback = contactLinks().feedback
   const used = new Set(usedStyles.map((style) => findStudioStyle(style)?.id ?? style))
   const nextStyles = STUDIO_STYLES.filter((style) => !used.has(style.id)).slice(0, 6)
@@ -59,7 +89,10 @@ export default function ResultView({
         key={design.id}
         beforeSrc={beforeSrc}
         afterSrc={design.imageUrl}
-        afterAlt={`After: ${styleName} design of your room`}
+        afterAlt={edit ? `New: ${editHeadline(edit).toLowerCase()}` : `After: ${styleName} design of your room`}
+        beforeAlt={beforeLabel === "Previous" ? "Previous: the design before this change" : undefined}
+        beforeLabel={beforeLabel}
+        afterLabel={beforeLabel === "Previous" ? "New" : "After"}
         onFirstMove={onSliderMoved}
       />
 
@@ -85,13 +118,77 @@ export default function ResultView({
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[15px] font-semibold leading-snug text-ks-ink">Get a quote</span>
               <span className="text-[13px] leading-snug text-ks-charcoal">
-                For the whole room or chosen pieces. {QUOTE_REPLY_PROMISE}
+                {budget && budget !== "unsure" ? "Real prices within your budget." : "For the whole room or chosen pieces."}{" "}
+                {QUOTE_REPLY_PROMISE}
               </span>
             </span>
             <ChevronRight className="h-[18px] w-[18px] flex-shrink-0 text-ks-charcoal" aria-hidden="true" />
           </button>
         )}
-        {(asked.length > 0 || piece) && (
+        {edit && (
+          <section className="mt-3.5 rounded-2xl border border-ks-line bg-white px-3.5 py-3">
+            <h2 className="font-sans text-[13px] font-semibold leading-normal text-ks-stone">What changed</h2>
+            <div className="mt-1.5 flex items-start gap-2.5">
+              {piece && edit.withPiece ? (
+                <img src={piece.imageUrl} alt="" className="mt-0.5 h-9 w-9 flex-shrink-0 rounded-lg object-cover" />
+              ) : (
+                <span className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-ks-sand text-ks-charcoal">
+                  <ArrowLeftRight className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+                </span>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-medium leading-snug text-ks-ink">{editHeadline(edit)}</p>
+                {editDetail(edit) && <p className="mt-0.5 text-[13px] leading-snug text-ks-stone">{editDetail(edit)}</p>}
+                {piece && edit.withPiece && onQuote && (
+                  <button
+                    type="button"
+                    onClick={() => onQuote(`piece:${piece.id}`)}
+                    className="inline-flex min-h-[32px] items-center text-[14px] font-medium text-ks-charcoal underline underline-offset-4"
+                  >
+                    Want this one? Get a quote for it
+                  </button>
+                )}
+              </div>
+            </div>
+            {editMissed && (
+              <div className="mt-2.5 flex items-center gap-2.5 rounded-[10px] bg-[#FBF3E4] px-2.5 py-1.5">
+                <AlertCircle className="h-[18px] w-[18px] flex-shrink-0 text-[#92400E]" aria-hidden="true" />
+                <p className="flex-1 text-[14px] leading-snug text-ks-ink">{editMissed}</p>
+                {onRetryEdit && (
+                  <button
+                    type="button"
+                    onClick={onRetryEdit}
+                    className="flex min-h-[40px] items-center px-1 text-[14px] font-semibold text-ks-charcoal underline underline-offset-4"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="mt-2.5 grid grid-cols-2 gap-2">
+              {onChangePiece && (
+                <button
+                  type="button"
+                  onClick={onChangePiece}
+                  className="min-h-[44px] rounded-xl border border-[#D1D5DB] bg-white px-2 text-[14px] font-semibold text-ks-charcoal hover:border-ks-charcoal"
+                >
+                  Change another piece
+                </button>
+              )}
+              {previousId && onShowDesign && (
+                <button
+                  type="button"
+                  onClick={() => onShowDesign(previousId)}
+                  className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[#D1D5DB] bg-white px-2 text-[14px] font-semibold text-ks-charcoal hover:border-ks-charcoal"
+                >
+                  <Undo2 className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+                  Previous design
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+        {!edit && (asked.length > 0 || piece) && (
           <section className="mt-3.5 rounded-2xl border border-ks-line bg-white px-3.5 py-3">
             {(shownPieces.length > 0 || pieceShown) && (
               <>
@@ -152,6 +249,70 @@ export default function ResultView({
               </div>
             )}
           </section>
+        )}
+        <section aria-live="polite" className="mt-3 rounded-2xl border border-ks-line bg-white py-2 pl-3.5 pr-2">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-ks-sand text-ks-charcoal">
+              <Wallet className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[15px] font-semibold leading-snug text-ks-ink">
+                {budget ? `Budget: ${budgetLabel(budget)}` : "Budget"}
+              </span>
+              <span className="text-[13px] leading-snug text-ks-stone">{budgetPriceLine}</span>
+            </span>
+            {onBudgetChange && (
+              <button
+                type="button"
+                onClick={() => setBudgetOpen((v) => !v)}
+                aria-expanded={budgetOpen}
+                className="flex min-h-[44px] items-center px-2 text-[14px] font-semibold text-ks-charcoal underline underline-offset-4"
+              >
+                {budgetOpen ? "Done" : budget ? "Change" : "Set it"}
+              </button>
+            )}
+          </div>
+          {budgetOpen && onBudgetChange && (
+            <div role="radiogroup" aria-label="Budget for this room" className="mb-1 mr-1.5 mt-2.5 grid grid-cols-2 gap-2">
+              {BUDGET_TIERS.map((tier) => {
+                const on = tier.id === budget
+                const price = tier.id === "unsure" ? "Options at each budget" : budgetPrice(roomType, tier.id)
+                return (
+                  <button
+                    key={tier.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => onBudgetChange(tier.id)}
+                    className={`flex min-h-[56px] flex-col items-start justify-center rounded-xl border px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ks-charcoal ${
+                      on ? "border-ks-charcoal bg-ks-charcoal text-white" : "border-[#D1D5DB] bg-white text-ks-charcoal"
+                    }`}
+                  >
+                    <span className="text-[14px] font-semibold leading-snug">{tier.label}</span>
+                    <span className={`text-[12px] leading-snug ${on ? "text-[#E5E7EB]" : "text-ks-stone"}`}>{price}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <p className="mr-1.5 mt-1 text-[13px] leading-snug text-ks-stone">
+            We use your budget to match real pieces and prices in your quote. The design stays the same.
+          </p>
+        </section>
+        {onChangePiece && !edit && (
+          <button
+            type="button"
+            onClick={onChangePiece}
+            className="mt-3 flex min-h-[52px] w-full items-center gap-3 rounded-2xl border border-ks-line bg-white px-3.5 py-2 text-left outline-none transition-colors duration-150 hover:border-ks-charcoal focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+          >
+            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[#D1D5DB] text-ks-charcoal">
+              <ArrowLeftRight className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+            </span>
+            <span className="flex flex-col">
+              <span className="text-[15px] font-semibold leading-snug text-ks-ink">Change a piece</span>
+              <span className="text-[13px] leading-snug text-ks-stone">Swap, move or remove any piece; the rest stays</span>
+            </span>
+          </button>
         )}
         {onAddPiece && (
           <button

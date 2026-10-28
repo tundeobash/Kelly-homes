@@ -11,6 +11,7 @@ import { normalizeProject } from "@/lib/api/normalize-project"
 import { randomBytes } from "crypto"
 import { del } from "@vercel/blob"
 import { filesOnlyThisRoomUses, shouldDeleteFiles } from "@/lib/blobFiles"
+import { cleanBudget } from "@/lib/design/budget"
 
 // Generate a unique request ID for logging
 function generateRequestId(): string {
@@ -238,6 +239,20 @@ export async function PATCH(
     const { styleId, imageUrl } = body
 
     const updateData: any = {}
+
+    // The room's budget (lib/design/budget.ts): kept with the room's other design settings.
+    // null clears it. It goes into quote requests; it does not change designs.
+    if (body && Object.prototype.hasOwnProperty.call(body, "budget")) {
+      const budget = cleanBudget(body.budget)
+      if (body.budget !== null && !budget) {
+        return NextResponse.json({ error: "Unknown budget" }, { status: 400 })
+      }
+      const settings =
+        project.lastAiSettings && typeof project.lastAiSettings === "object" && !Array.isArray(project.lastAiSettings)
+          ? (project.lastAiSettings as Record<string, unknown>)
+          : {}
+      updateData.lastAiSettings = JSON.parse(JSON.stringify({ ...settings, budget }))
+    }
 
     // Update imageUrl if provided
     if (imageUrl) {

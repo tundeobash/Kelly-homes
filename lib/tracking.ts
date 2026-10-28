@@ -13,6 +13,11 @@ export const TRACKED_EVENTS = [
   "quote_opened", // opened "Get a quote" on a design
   "quote_room_sent", // sent a quote request for the whole room
   "quote_pieces_sent", // sent a quote request for chosen pieces
+  "budget_set", // picked or changed the room's budget
+  "change_opened", // opened "Change a piece" on a design
+  "piece_swapped", // asked to swap a piece
+  "piece_moved", // asked to move a piece
+  "piece_removed", // asked to remove a piece
 ] as const
 
 export type TrackedEvent = (typeof TRACKED_EVENTS)[number]

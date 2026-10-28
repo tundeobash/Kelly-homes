@@ -134,3 +134,46 @@ email. The sheet promises "We'll reply within 2 working days" (Ayo, 29 Oct).
   quote_room_sent and quote_pieces_sent.
 - Replaces the separate "Get a quote from a local maker" link under a piece,
   which now opens the same sheet with that piece ticked.
+
+## 2026-10-29 — Budget bands, Change a piece, and the wide-photo tip
+
+Items 5 to 7 of the 28 Oct build list, sketched and agreed with Ayo on 29 Oct.
+
+**Budget (item 5).** A "Budget" row on the style step and on the result:
+Affordable, Mid-range, Premium or Not sure yet, with AED bands per kind of room
+(lib/design/budget.ts). It is kept on the room (lastAiSettings.budget) and goes
+into quote requests.
+
+- **Ayo's choices:** show AED figures; the budget does not change the design
+  picture ("people might not be able to note the change in materials from the
+  image design"), so there are no cheaper or premium re-renders.
+- **Bands (AED, incl. VAT; furniture, rugs, lighting, curtains, decor; not
+  delivery or fitting):** living room up to 12,000 / 12,000–30,000 / 30,000+;
+  living + dining 18,000 / 50,000; bedroom 10,000 / 30,000; dining room 8,000 /
+  25,000; office 6,000 / 20,000. Kitchen and Other: priced in the quote.
+- **Basis:** a typical basket per room priced at IKEA UAE, 2XL Home (regular
+  prices) and BoConcept UAE on 29 Oct 2026. Living and dining room baskets are
+  50–70% checked store prices; bedroom and office are mostly estimates and
+  should be checked before matching relies on them.
+
+**Change a piece (item 7).** On any design: dots on the pieces Gemini finds
+(cached on the design as detectedPieces), then Swap (quick changes, a piece you
+love, or a description), Move (tap the new spot) or Remove (with a confirm).
+Each change is a new design made from the one on show; the slider then compares
+"Previous" and "New", and "What changed" says what was done.
+
+- **How it works:** the image model gets the design, the same design with the
+  piece outlined in red (and a red dot for a move), and for a swap with a piece
+  the person loves, that piece's photo. The instruction says to change only that
+  piece and to draw no marks. The check is asked whether the piece (or the new
+  piece) is visible; only an empty result is refused, so removing the sofa is
+  allowed. Counted as change_opened, piece_swapped, piece_moved, piece_removed.
+- **Ayo's choices:** dots rather than tap-anywhere; Remove as well as Swap and
+  Move. Exact products, maker options and labelled sponsored picks fit into Swap
+  later.
+
+**Wide-photo tip (item 6).** Add a room shows the same room at 1× and 0.5× and
+three tips, with "Take a photo" (opens the camera) and "Choose from your
+photos". A tip, not a rule (Ayo: "the idea is to capture as much of the room as
+possible"; his 0.5× photos worked). The example is the empty flat already shown
+on the landing page.

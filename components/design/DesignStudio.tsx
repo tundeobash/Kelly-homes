@@ -11,10 +11,12 @@ import type { CompareItem } from "@/components/design/CompareView"
 import FailureView from "@/components/design/FailureView"
 import PieceSheet from "@/components/design/PieceSheet"
 import QuoteSheet from "@/components/design/QuoteSheet"
+import ChangePieceView from "@/components/design/ChangePieceView"
+import SwapSheet from "@/components/design/SwapSheet"
 import ImageLightbox from "@/components/design/ImageLightbox"
 import {
   addDesign,
-  beforePhotoFor,
+  comparisonFor,
   defaultComparePair,
   describeFailure,
   designFromReply,
@@ -26,6 +28,10 @@ import { STUDIO_STYLES, findStudioStyle, styleDisplayName } from "@/lib/design/s
 import { picksFromResults } from "@/lib/design/mustInclude"
 import { addPiece } from "@/lib/design/pieces"
 import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
+import { budgetQuoteLine } from "@/lib/design/budget"
+import type { BudgetTier } from "@/lib/design/budget"
+import { readDetected, shortName } from "@/lib/design/pieceEdit"
+import type { DetectedPiece, EditAction } from "@/lib/design/pieceEdit"
 import { track } from "@/lib/tracking"
 
 export interface DesignStudioProject {
@@ -37,11 +43,38 @@ export interface DesignStudioProject {
   mustInclude?: string[]
   /** The room's pieces the person loves, newest first (lib/design/pieces.ts). */
   pieces?: StudioPiece[]
+  /** The room's budget band (lib/design/budget.ts). */
+  budget?: BudgetTier | null
   /** Newest first, as stored. */
   designs: StudioDesign[]
 }
 
-type View = "choose" | "generating" | "result" | "compare" | "failure"
+type View = "choose" | "generating" | "result" | "compare" | "failure" | "change"
+
+/** A change to one piece, as sent to /api/ai/stage-room. */
+interface EditPayload {
+  action: EditAction
+  baseDesignId: string
+  target: DetectedPiece
+  to?: { x: number; y: number } | null
+  changes?: string[]
+  text?: string
+}
+
+type GenerateOpts = {
+  must?: string[]
+  piece?: StudioPiece | null
+  mode?: PieceMode
+  baseDesignId?: string | null
+  edit?: EditPayload
+}
+
+function editTitle(edit: EditPayload): string {
+  const name = shortName(edit.target)
+  if (edit.action === "remove") return `Removing the ${name}`
+  if (edit.action === "move") return `Moving the ${name}`
+  return `Swapping the ${name}`
+}
 
 function firstUnusedStyle(designs: StudioDesign[]): string {
   const used = new Set(designs.map((d) => findStudioStyle(d.style)?.id ?? d.style))
@@ -65,7 +98,21 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   // A piece for the next design ("around" mode), the room's pieces, and which piece sheet is open.
   const [piece, setPiece] = useState<StudioPiece | null>(null)
   const [pieces, setPieces] = useState<StudioPiece[]>(project.pieces ?? [])
-  const [pieceSheet, setPieceSheet] = useState<PieceMode | null>(null)
+  const [pieceSheet, setPieceSheet] = useState<PieceMode | "swap" | null>(null)
+  const [budget, setBudget] = useState<BudgetTier | null>(project.budget ?? null)
+  // "Change a piece": the pieces found per design, the piece being swapped, and what to swap in.
+  const [detected, setDetected] = useState<Record<string, DetectedPiece[]>>(() => {
+    const found: Record<string, DetectedPiece[]> = {}
+    for (const d of project.designs) if (d.detected && d.detected.length > 0) found[d.id] = d.detected
+    return found
+  })
+  const [detectError, setDetectError] = useState<string | null>(null)
+  const [swapTarget, setSwapTarget] = useState<DetectedPiece | null>(null)
+  const [swapPiece, setSwapPiece] = useState<StudioPiece | null>(null)
+  const [generatingTitle, setGeneratingTitle] = useState<string | null>(null)
+  const [generatingPhoto, setGeneratingPhoto] = useState<string | null>(null)
+  // The change that made each new design, so "Try again" can repeat it.
+  const editRequests = useRef<Record<string, { style: string; opts: GenerateOpts }>>({})
   // "Get a quote" sheet: null when closed; preselect ticks one item.
   const [quote, setQuote] = useState<{ preselect: string | null } | null>(null)
   const [startedAt, setStartedAt] = useState(0)
@@ -79,14 +126,11 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   const [uploadError, setUploadError] = useState<string | null>(null)
   const busy = useRef(false)
   // The last design asked for, so "Try again" after a failure repeats it exactly.
-  const lastRequest = useRef<{
-    style: string
-    opts: { must?: string[]; piece?: StudioPiece | null; mode?: PieceMode; baseDesignId?: string | null }
-  } | null>(null)
+  const lastRequest = useRef<{ style: string; opts: GenerateOpts } | null>(null)
   const closeLightbox = useCallback(() => setLightbox(null), [])
 
   const current = designs.find((d) => d.id === currentId) ?? designs[0] ?? null
-  const shown: View = (view === "result" || view === "compare") && !current ? "choose" : view
+  const shown: View = (view === "result" || view === "compare" || view === "change") && !current ? "choose" : view
   const roomLabel = project.roomType?.trim().toLowerCase() || "room"
 
   const go = useCallback((next: View) => {
@@ -110,22 +154,26 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
    * opts.piece / mode / baseDesignId: a piece to use instead of the current one; "place" adds it
    * to the design baseDesignId.
    */
-  const generate = async (
-    styleId: string,
-    opts: { must?: string[]; piece?: StudioPiece | null; mode?: PieceMode; baseDesignId?: string | null } = {}
-  ) => {
+  const generate = async (styleId: string, opts: GenerateOpts = {}) => {
     const usePiece = opts.piece !== undefined ? opts.piece : piece
-    const mode: PieceMode | undefined = usePiece ? opts.mode ?? "around" : undefined
-    lastRequest.current = {
-      style: styleId,
-      opts: { must: opts.must ?? mustInclude, piece: usePiece ?? null, mode, baseDesignId: opts.baseDesignId ?? null },
+    const mode: PieceMode | undefined = usePiece && !opts.edit ? opts.mode ?? "around" : undefined
+    const requestOpts: GenerateOpts = {
+      must: opts.must ?? mustInclude,
+      piece: usePiece ?? null,
+      mode,
+      baseDesignId: opts.baseDesignId ?? null,
+      edit: opts.edit,
     }
+    lastRequest.current = { style: styleId, opts: requestOpts }
     if (busy.current) return
     if (!photoUrl) {
       go("choose")
       return
     }
     busy.current = true
+    const editBase = opts.edit ? designs.find((d) => d.id === opts.edit!.baseDesignId) ?? null : null
+    setGeneratingTitle(opts.edit ? editTitle(opts.edit) : null)
+    setGeneratingPhoto(editBase ? editBase.imageUrl : null)
     setGeneratingStyle(styleId)
     setPicked(styleId)
     setStartedAt(Date.now())
@@ -143,10 +191,20 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           style: styleId,
           roomType: project.roomType || undefined,
           prompt: note.trim() || undefined,
-          mustInclude: opts.must ?? mustInclude,
+          mustInclude: opts.edit ? [] : opts.must ?? mustInclude,
           piece: usePiece || undefined,
           pieceMode: mode,
           baseDesignId: mode === "place" ? opts.baseDesignId || undefined : undefined,
+          edit: opts.edit
+            ? {
+                action: opts.edit.action,
+                baseDesignId: opts.edit.baseDesignId,
+                target: { name: opts.edit.target.name, kind: opts.edit.target.kind, box: opts.edit.target.box },
+                to: opts.edit.to ?? undefined,
+                changes: opts.edit.changes ?? [],
+                text: opts.edit.text ?? "",
+              }
+            : undefined,
         }),
       })
       reply = (await res.json().catch(() => null)) as StageRoomReply | null
@@ -157,6 +215,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
 
     const design = designFromReply(reply, { style: styleId, sourceImageUrl: photoUrl, now: new Date() })
     if (design) {
+      if (opts.edit) editRequests.current[design.id] = { style: styleId, opts: requestOpts }
       const next = addDesign(designs, design)
       setDesigns(next)
       setCurrentId(design.id)
@@ -198,6 +257,60 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     }
   }
 
+  const saveBudget = (tier: BudgetTier) => {
+    const before = budget
+    setBudget(tier)
+    track("budget_set", project.id)
+    void fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ budget: tier }),
+    })
+      .then((res) => {
+        if (!res.ok) setBudget(before)
+      })
+      .catch(() => setBudget(before))
+  }
+
+  const findPieces = async (designId: string) => {
+    setDetectError(null)
+    try {
+      const res = await fetch("/api/ai/detect-pieces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, designId }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.success) throw new Error(data?.errorMessage || "Please try again.")
+      setDetected((all) => ({ ...all, [designId]: readDetected(data.pieces) ?? [] }))
+    } catch (error) {
+      setDetectError(error instanceof Error ? error.message : "Please try again.")
+    }
+  }
+
+  const openChange = () => {
+    if (!current) return
+    track("change_opened", project.id)
+    setDetectError(null)
+    go("change")
+    if (!detected[current.id] || detected[current.id].length === 0) {
+      setDetected((all) => {
+        const next = { ...all }
+        delete next[current.id]
+        return next
+      })
+      void findPieces(current.id)
+    }
+  }
+
+  const changePiece = (edit: Omit<EditPayload, "baseDesignId">, withPiece: StudioPiece | null = null) => {
+    if (!current) return
+    track(edit.action === "swap" ? "piece_swapped" : edit.action === "move" ? "piece_moved" : "piece_removed", project.id)
+    setSwapTarget(null)
+    setSwapPiece(null)
+    generate(current.style, { piece: withPiece, must: [], edit: { ...edit, baseDesignId: current.id } })
+  }
+
   const openCompare = () => {
     track("compare_opened", project.id)
     setPair(defaultComparePair(designs, current?.id ?? null))
@@ -205,14 +318,14 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   }
 
   const back = () => {
-    if (shown === "compare") go("result")
+    if (shown === "compare" || shown === "change") go("result")
     else if (shown === "choose" && designs.length > 0) go("result")
     else if (shown === "failure") go(designs.length > 0 ? "result" : "choose")
     else router.push("/profile/me")
   }
 
   const backLabel =
-    shown === "compare" || ((shown === "choose" || shown === "failure") && designs.length > 0)
+    shown === "compare" || shown === "change" || ((shown === "choose" || shown === "failure") && designs.length > 0)
       ? "Back to your design"
       : "Back to your rooms"
 
@@ -232,7 +345,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           <span className="w-2" />
         )}
         <p className="min-w-0 flex-1 truncate text-[16px] font-semibold text-ks-ink">
-          {shown === "compare" ? "Compare designs" : project.name}
+          {shown === "compare" ? "Compare designs" : shown === "change" ? "Change a piece" : project.name}
         </p>
         {shown === "result" && (
           <span className="mr-1 flex items-center gap-1.5 rounded-full bg-ks-sand px-2.5 py-1.5 text-[13px] font-medium leading-none text-ks-charcoal">
@@ -259,23 +372,28 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           piece={piece}
           onAddPiece={() => setPieceSheet("around")}
           onRemovePiece={() => setPiece(null)}
+          budget={budget}
+          onBudgetChange={saveBudget}
         />
       )}
 
       {shown === "generating" && (
         <GeneratingView
-          photoUrl={photoUrl}
+          photoUrl={generatingPhoto || photoUrl}
           styleName={styleDisplayName(generatingStyle)}
           roomLabel={roomLabel}
           roomName={project.name}
           startedAt={startedAt}
+          title={generatingTitle || undefined}
         />
       )}
 
       {shown === "result" && current && (
         <ResultView
           design={current}
-          beforeSrc={beforePhotoFor(current, photoUrl)}
+          beforeSrc={comparisonFor(current, designs, photoUrl).src}
+          beforeLabel={comparisonFor(current, designs, photoUrl).label}
+          previousId={comparisonFor(current, designs, photoUrl).previousId}
           styleName={styleDisplayName(current.style)}
           number={designNumber(designs, current.id)}
           total={designs.length}
@@ -301,6 +419,45 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           }
           onAddPiece={() => setPieceSheet("place")}
           onQuote={(preselect) => setQuote({ preselect: preselect ?? null })}
+          roomType={project.roomType}
+          budget={budget}
+          onBudgetChange={saveBudget}
+          onChangePiece={openChange}
+          onShowDesign={(id) => {
+            setCurrentId(id)
+            window.scrollTo({ top: 0 })
+          }}
+          onRetryEdit={
+            editRequests.current[current.id]
+              ? () => {
+                  const again = editRequests.current[current.id]
+                  generate(again.style, again.opts)
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {shown === "change" && current && (
+        <ChangePieceView
+          imageUrl={current.imageUrl}
+          styleName={styleDisplayName(current.style)}
+          pieces={detected[current.id] ?? null}
+          error={detectError}
+          onRetry={() => {
+            setDetected((all) => {
+              const next = { ...all }
+              delete next[current.id]
+              return next
+            })
+            void findPieces(current.id)
+          }}
+          onSwap={(target) => {
+            setSwapPiece(null)
+            setSwapTarget(target)
+          }}
+          onMove={(target, to) => changePiece({ action: "move", target, to })}
+          onRemove={(target) => changePiece({ action: "remove", target })}
         />
       )}
 
@@ -348,7 +505,25 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
         styleName={current ? styleDisplayName(current.style) : ""}
         projectId={project.id}
         preselect={quote?.preselect ?? null}
+        budgetLine={budgetQuoteLine(project.roomType, budget)}
         onClose={() => setQuote(null)}
+      />
+
+      <SwapSheet
+        open={swapTarget !== null && shown === "change"}
+        target={swapTarget}
+        pieces={pieces}
+        chosen={swapPiece}
+        onChoose={setSwapPiece}
+        onAddPhoto={() => setPieceSheet("swap")}
+        onSwap={(request) =>
+          swapTarget &&
+          changePiece({ action: "swap", target: swapTarget, changes: request.changes, text: request.text }, request.piece)
+        }
+        onClose={() => {
+          setSwapTarget(null)
+          setSwapPiece(null)
+        }}
       />
 
       <PieceSheet
@@ -356,7 +531,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
         projectId={project.id}
         pieces={pieces}
         title={pieceSheet === "place" ? "Add a piece to this design" : "A piece you love"}
-        useLabel={pieceSheet === "place" ? "Add it to my design" : "Use this piece"}
+        useLabel={pieceSheet === "place" ? "Add it to my design" : pieceSheet === "swap" ? "Swap it in" : "Use this piece"}
         onClose={() => setPieceSheet(null)}
         onSaved={(saved) => setPieces((list) => addPiece(list, saved))}
         onUse={(chosen) => {
@@ -364,6 +539,8 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           setPieceSheet(null)
           if (purpose === "place" && current) {
             generate(current.style, { must: [], piece: chosen, mode: "place", baseDesignId: current.id })
+          } else if (purpose === "swap") {
+            setSwapPiece(chosen)
           } else {
             setPiece(chosen)
           }

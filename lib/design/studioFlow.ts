@@ -6,6 +6,8 @@ import { readMustIncludeResults } from "@/lib/design/mustInclude"
 import type { MustIncludeResult } from "@/lib/design/mustInclude"
 import { cleanPiece, cleanPieceMode } from "@/lib/design/pieces"
 import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
+import { readDesignEdit } from "@/lib/design/pieceEdit"
+import type { DesignEdit, DetectedPiece } from "@/lib/design/pieceEdit"
 
 export const DESIGN_STEPS = [
   "Reading your room",
@@ -48,8 +50,12 @@ export interface StudioDesign {
   piece?: StudioPiece | null
   pieceMode?: PieceMode | null
   pieceIncluded?: boolean | null
-  /** For a piece added to an existing design: that design. */
+  /** For a piece added to an existing design, or a changed piece: that design. */
   baseDesignId?: string | null
+  /** "Change a piece": what was swapped, moved or removed to make this design. */
+  edit?: DesignEdit | null
+  /** The pieces found in this design for "Change a piece", once looked for. */
+  detected?: DetectedPiece[] | null
 }
 
 /** What /api/ai/stage-room sends back (only the fields the screen uses). */
@@ -66,6 +72,7 @@ export interface StageRoomReply {
   pieceMode?: unknown
   pieceIncluded?: unknown
   baseDesignId?: unknown
+  edit?: unknown
   sourceImageUrl?: unknown
 }
 
@@ -148,6 +155,7 @@ export function designFromReply(
     pieceMode: cleanPieceMode(reply.pieceMode),
     pieceIncluded: typeof reply.pieceIncluded === "boolean" ? reply.pieceIncluded : null,
     baseDesignId: typeof reply.baseDesignId === "string" ? reply.baseDesignId : null,
+    edit: readDesignEdit(reply.edit),
   }
 }
 
@@ -181,4 +189,20 @@ export function designNumber(designs: StudioDesign[], id: string): number {
 /** The "before" picture for a design: the photo it was made from, else the room's current photo. */
 export function beforePhotoFor(design: StudioDesign | null | undefined, roomPhoto: string | null): string | null {
   return (design && design.sourceImageUrl) || roomPhoto || null
+}
+
+/**
+ * What the slider compares a design with. A changed piece compares with the design it
+ * was made from ("Previous"), while that design is still kept; anything else with the room photo.
+ */
+export function comparisonFor(
+  design: StudioDesign | null | undefined,
+  designs: StudioDesign[],
+  roomPhoto: string | null
+): { src: string | null; label: "Before" | "Previous"; previousId: string | null } {
+  if (design?.edit && design.baseDesignId) {
+    const base = designs.find((d) => d.id === design.baseDesignId)
+    if (base) return { src: base.imageUrl, label: "Previous", previousId: base.id }
+  }
+  return { src: beforePhotoFor(design, roomPhoto), label: "Before", previousId: null }
 }
