@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Camera, ChevronLeft, Loader2, X } from "lucide-react"
+import { Camera, Check, ChevronLeft, Loader2, X } from "lucide-react"
 import { cleanBox, cleanPiece, pieceLabel } from "@/lib/design/pieces"
 import type { PieceBox, StudioPiece } from "@/lib/design/pieces"
 import { track } from "@/lib/tracking"
@@ -119,17 +119,21 @@ export default function PieceSheet({ open, projectId, pieces, title, useLabel, o
     setTap(null)
     setBox(null)
     setStage("tap")
+    // Most photos are of the piece itself: look in the middle straight away, so the
+    // person sees their photo was added and what we found. They tap to correct it.
+    void find({ x: 0.5, y: 0.5 }, blob)
   }
 
-  const find = async (point: { x: number; y: number }) => {
-    if (!photo || busy) return
+  const find = async (point: { x: number; y: number }, blobOverride?: Blob) => {
+    const source = blobOverride ?? photo?.blob
+    if (!source || (busy && !blobOverride)) return
     setTap(point)
     setBox(null)
     setError(null)
     setBusy("find")
     try {
       const form = new FormData()
-      form.append("file", photo.blob, "piece.jpg")
+      form.append("file", source, "piece.jpg")
       form.append("x", String(point.x))
       form.append("y", String(point.y))
       const res = await fetch("/api/pieces/identify", { method: "POST", body: form })
@@ -191,7 +195,15 @@ export default function PieceSheet({ open, projectId, pieces, title, useLabel, o
   }
 
   const heading =
-    stage === "choose" ? title : stage === "tap" ? "Tap the piece you mean" : name ? "Is this the piece?" : "What is this piece?"
+    stage === "choose"
+      ? title
+      : stage === "tap"
+        ? busy === "find"
+          ? "Finding your piece"
+          : "Tap the piece you mean"
+        : name
+          ? "Is this the piece?"
+          : "What is this piece?"
 
   return (
     <div
@@ -301,8 +313,16 @@ export default function PieceSheet({ open, projectId, pieces, title, useLabel, o
 
           {stage !== "choose" && photo && (
             <>
-              <p className="mt-1 text-[14px] leading-normal text-ks-stone">
-                {stage === "tap" ? "We'll find it and name it." : "Not right? Tap the piece again."}
+              <p className="mt-1 flex items-center gap-1.5 text-[14px] font-medium leading-normal text-ks-charcoal">
+                <Check className="h-4 w-4 flex-shrink-0" strokeWidth={2.4} aria-hidden="true" />
+                Photo added
+              </p>
+              <p className="mt-0.5 text-[14px] leading-normal text-ks-stone" aria-live="polite">
+                {stage === "tap"
+                  ? busy === "find"
+                    ? "Looking for the piece in your photo."
+                    : "Tap the piece in your photo and we'll find it and name it."
+                  : "Not right? Tap the piece you mean."}
               </p>
               <div className="mt-3 flex justify-center">
                 <button

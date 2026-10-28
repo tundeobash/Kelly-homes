@@ -30,6 +30,12 @@ export default function MustIncludeSheet({
   onRemovePiece,
 }: MustIncludeSheetProps) {
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const pieceRef = useRef<HTMLDivElement>(null)
+
+  // When a piece has just been added, bring it into view so it is clear it worked.
+  useEffect(() => {
+    if (open && piece) pieceRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [open, piece])
 
   useEffect(() => {
     if (!open) return
@@ -131,11 +137,14 @@ export default function MustIncludeSheet({
 
           <h3 className="mb-2.5 mt-6 text-[13px] font-semibold leading-normal text-ks-stone">A piece you love</h3>
           {piece ? (
-            <div className="flex items-center gap-3 rounded-2xl border border-ks-line bg-ks-paper p-3">
+            <div ref={pieceRef} className="flex items-center gap-3 rounded-2xl border border-ks-gold bg-ks-paper p-3">
               <img src={piece.imageUrl} alt="" className="h-14 w-14 flex-shrink-0 rounded-xl object-cover" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15px] font-semibold leading-snug text-ks-ink">{pieceLabel(piece)}</p>
-                <p className="text-[13px] leading-snug text-ks-stone">Goes into your next design</p>
+                <p className="flex items-center gap-1 text-[13px] leading-snug text-ks-charcoal" role="status">
+                  <Check className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.4} aria-hidden="true" />
+                  Added. It goes into your next design.
+                </p>
               </div>
               <button
                 type="button"
