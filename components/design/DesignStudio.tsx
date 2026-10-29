@@ -13,6 +13,7 @@ import PieceSheet from "@/components/design/PieceSheet"
 import QuoteSheet from "@/components/design/QuoteSheet"
 import ChangePieceView from "@/components/design/ChangePieceView"
 import SwapSheet from "@/components/design/SwapSheet"
+import EstimateSheet from "@/components/design/EstimateSheet"
 import ImageLightbox from "@/components/design/ImageLightbox"
 import {
   addDesign,
@@ -29,6 +30,7 @@ import { picksFromResults } from "@/lib/design/mustInclude"
 import { addPiece } from "@/lib/design/pieces"
 import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
 import { budgetQuoteLine } from "@/lib/design/budget"
+import { estimateFor, estimateTier } from "@/lib/design/estimate"
 import type { BudgetTier } from "@/lib/design/budget"
 import { readDetected, shortName } from "@/lib/design/pieceEdit"
 import type { DetectedPiece, EditAction } from "@/lib/design/pieceEdit"
@@ -106,15 +108,19 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     for (const d of project.designs) if (d.detected && d.detected.length > 0) found[d.id] = d.detected
     return found
   })
-  const [detectError, setDetectError] = useState<string | null>(null)
+  // Per design: why the pieces could not be found; pieces left out of the estimate.
+  const [detectErrors, setDetectErrors] = useState<Record<string, string>>({})
+  const [excluded, setExcluded] = useState<Record<string, string[]>>({})
+  const [estimateOpen, setEstimateOpen] = useState(false)
+  const detecting = useRef<Set<string>>(new Set())
   const [swapTarget, setSwapTarget] = useState<DetectedPiece | null>(null)
   const [swapPiece, setSwapPiece] = useState<StudioPiece | null>(null)
   const [generatingTitle, setGeneratingTitle] = useState<string | null>(null)
   const [generatingPhoto, setGeneratingPhoto] = useState<string | null>(null)
   // The change that made each new design, so "Try again" can repeat it.
   const editRequests = useRef<Record<string, { style: string; opts: GenerateOpts }>>({})
-  // "Get a quote" sheet: null when closed; preselect ticks one item.
-  const [quote, setQuote] = useState<{ preselect: string | null } | null>(null)
+  // "Get a quote" sheet: null when closed; preselect ticks items ("piece:<id>", "found:<id>").
+  const [quote, setQuote] = useState<{ preselect: string | string[] | null } | null>(null)
   const [startedAt, setStartedAt] = useState(0)
   const [generatingStyle, setGeneratingStyle] = useState<string>(picked)
   const [failure, setFailure] = useState<StudioFailure | null>(null)
@@ -273,7 +279,13 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   }
 
   const findPieces = async (designId: string) => {
-    setDetectError(null)
+    if (detecting.current.has(designId)) return
+    detecting.current.add(designId)
+    setDetectErrors((all) => {
+      const next = { ...all }
+      delete next[designId]
+      return next
+    })
     try {
       const res = await fetch("/api/ai/detect-pieces", {
         method: "POST",
@@ -284,23 +296,39 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
       if (!res.ok || !data?.success) throw new Error(data?.errorMessage || "Please try again.")
       setDetected((all) => ({ ...all, [designId]: readDetected(data.pieces) ?? [] }))
     } catch (error) {
-      setDetectError(error instanceof Error ? error.message : "Please try again.")
+      const message = error instanceof Error ? error.message : "Please try again."
+      setDetectErrors((all) => ({ ...all, [designId]: message }))
+    } finally {
+      detecting.current.delete(designId)
     }
   }
+
+  const refindPieces = (designId: string) => {
+    setDetected((all) => {
+      const next = { ...all }
+      delete next[designId]
+      return next
+    })
+    void findPieces(designId)
+  }
+
+  // The estimate: find the pieces of each design shown, once.
+  useEffect(() => {
+    if (shown !== "result" || !current) return
+    if (detected[current.id] || detectErrors[current.id]) return
+    void findPieces(current.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown, current?.id])
+
+  const tier = estimateTier(budget)
+  const currentPieces = current ? detected[current.id] ?? null : null
+  const estimate = currentPieces && current ? estimateFor(currentPieces, tier, excluded[current.id] ?? []) : null
 
   const openChange = () => {
     if (!current) return
     track("change_opened", project.id)
-    setDetectError(null)
     go("change")
-    if (!detected[current.id] || detected[current.id].length === 0) {
-      setDetected((all) => {
-        const next = { ...all }
-        delete next[current.id]
-        return next
-      })
-      void findPieces(current.id)
-    }
+    if (!detected[current.id] || detected[current.id].length === 0) refindPieces(current.id)
   }
 
   const changePiece = (edit: Omit<EditPayload, "baseDesignId">, withPiece: StudioPiece | null = null) => {
@@ -419,9 +447,16 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           }
           onAddPiece={() => setPieceSheet("place")}
           onQuote={(preselect) => setQuote({ preselect: preselect ?? null })}
-          roomType={project.roomType}
           budget={budget}
-          onBudgetChange={saveBudget}
+          estimate={estimate}
+          estimateError={detectErrors[current.id] ?? null}
+          tier={tier}
+          onTierChange={saveBudget}
+          onOpenEstimate={() => {
+            track("estimate_opened", project.id)
+            setEstimateOpen(true)
+          }}
+          onRetryEstimate={() => refindPieces(current.id)}
           onChangePiece={openChange}
           onShowDesign={(id) => {
             setCurrentId(id)
@@ -443,15 +478,8 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           imageUrl={current.imageUrl}
           styleName={styleDisplayName(current.style)}
           pieces={detected[current.id] ?? null}
-          error={detectError}
-          onRetry={() => {
-            setDetected((all) => {
-              const next = { ...all }
-              delete next[current.id]
-              return next
-            })
-            void findPieces(current.id)
-          }}
+          error={detectErrors[current.id] ?? null}
+          onRetry={() => refindPieces(current.id)}
           onSwap={(target) => {
             setSwapPiece(null)
             setSwapTarget(target)
@@ -505,9 +533,34 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
         styleName={current ? styleDisplayName(current.style) : ""}
         projectId={project.id}
         preselect={quote?.preselect ?? null}
+        found={currentPieces ?? []}
+        tier={tier}
         budgetLine={budgetQuoteLine(project.roomType, budget)}
         onClose={() => setQuote(null)}
       />
+
+      {current && (
+        <EstimateSheet
+          open={estimateOpen && shown === "result"}
+          imageUrl={current.imageUrl}
+          estimate={estimate}
+          excluded={excluded[current.id] ?? []}
+          onToggle={(pieceId) =>
+            setExcluded((all) => {
+              const list = all[current.id] ?? []
+              const next = list.includes(pieceId) ? list.filter((id) => id !== pieceId) : [...list, pieceId]
+              return { ...all, [current.id]: next }
+            })
+          }
+          tier={tier}
+          onTierChange={saveBudget}
+          onQuote={(pieceIds) => {
+            setEstimateOpen(false)
+            setQuote({ preselect: pieceIds.map((id) => `found:${id}`) })
+          }}
+          onClose={() => setEstimateOpen(false)}
+        />
+      )}
 
       <SwapSheet
         open={swapTarget !== null && shown === "change"}

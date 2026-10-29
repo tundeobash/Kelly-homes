@@ -71,6 +71,19 @@ describe("finding pieces", () => {
     assert.deepEqual(parseDetected(JSON.stringify({ pieces: [] })), [])
   })
 
+  it("keeps how many alike there are, for the estimate", () => {
+    const found = parseDetected(
+      JSON.stringify([
+        { name: "leather bar stools", kind: "bar stool", count: 2, box_2d: [540, 870, 1000, 1000], point: [700, 940] },
+        { name: "rug", kind: "rug", count: 99, box_2d: [570, 290, 780, 890], point: [700, 400] },
+      ])
+    )
+    assert.equal(found[0].count, 2)
+    assert.equal("count" in found[1], false)
+    assert.equal(readDetected(JSON.parse(JSON.stringify(found)))![0].count, 2)
+    assert.match(buildDetectPrompt(), /count = how many there are/)
+  })
+
   it("reads stored pieces back", () => {
     const stored = parseDetected(JSON.stringify([{ name: "pouf", kind: "pouf", box_2d: [560, 670, 670, 850], point: [610, 760] }]))
     assert.deepEqual(readDetected(JSON.parse(JSON.stringify(stored))), stored)

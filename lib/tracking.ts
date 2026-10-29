@@ -18,6 +18,7 @@ export const TRACKED_EVENTS = [
   "piece_swapped", // asked to swap a piece
   "piece_moved", // asked to move a piece
   "piece_removed", // asked to remove a piece
+  "estimate_opened", // opened "What's in this design" from the estimate
 ] as const
 
 export type TrackedEvent = (typeof TRACKED_EVENTS)[number]

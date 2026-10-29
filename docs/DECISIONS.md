@@ -177,3 +177,29 @@ three tips, with "Take a photo" (opens the camera) and "Choose from your
 photos". A tip, not a rule (Ayo: "the idea is to capture as much of the room as
 possible"; his 0.5× photos worked). The example is the empty flat already shown
 on the landing page.
+
+## 2026-10-29 — Instant estimate on every design
+
+**Decision:** every design shows "Estimated cost" straight away: a range in AED
+for the pieces in it, at Affordable, Mid-range or Premium prices (the switch
+sets the room's budget and replaces the result's Budget row). "See what's
+included" lists each piece with its range and a tick; unticked pieces leave the
+total, and "Get a quote for these" sends the ticked pieces and the estimate.
+
+- **Why:** tester feedback, 29 Oct: "can quote (at least base case) immediately
+  pop up to know if I should continue dreaming or not. Then later, I can pick
+  what I want or not". Agreed with Ayo after a sketch, 29 Oct.
+- **How it works:** the pieces are found once per design (the Change a piece
+  call, now run automatically when a design is shown, and asked for a count, e.g.
+  2 bar stools). lib/design/estimate.ts maps each piece to a kind and prices it
+  from a table: the 25th to 75th percentile of listed prices at IKEA UAE
+  (Affordable), 2XL Home regular prices (Mid-range) and BoConcept UAE (Premium),
+  checked 29 Oct 2026 (full table in the Kelly Spaces project:
+  claude/kelly-spaces-price-table.md).
+- **Honesty rules:** ranges only; "typical UAE shop prices for similar pieces";
+  excludes delivery, fitting and made-to-measure work; pieces with no typical
+  price (mid-range bar stools, desks, office chairs and shelving; curtains above
+  Affordable; decor) say "In your quote" rather than a guess. Counted as
+  estimate_opened.
+- **To do:** a second mid-range source for the gaps; the maker price guide for
+  curtains and joinery; re-check prices every 2–3 months.

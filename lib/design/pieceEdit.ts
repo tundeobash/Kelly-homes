@@ -26,6 +26,8 @@ export interface DetectedPiece {
   box: PieceBox
   /** Where the dot goes: a spot on the piece that nothing covers. */
   point: { x: number; y: number }
+  /** How many alike, e.g. 2 bar stools or 6 dining chairs (for the estimate). Missing = 1. */
+  count?: number
 }
 
 /** What the person asked for, as the server receives it. */
@@ -85,6 +87,12 @@ function plainName(value: string): string {
 
 // ---- Finding the pieces in a design ------------------------------------------------
 
+/** 1 to 20 alike; anything else counts as 1. */
+function cleanCount(value: unknown): number {
+  const n = typeof value === "string" ? Number(value) : value
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 20 ? n : 1
+}
+
 export function buildDetectPrompt(): string {
   return `List the pieces in this room photo that someone might want to swap, move or remove: furniture, rugs, lamps and light fittings, curtains, mirrors, wall art, plants and large decor. Leave out walls, windows, doors, built-in cabinets and wardrobes, the floor, the ceiling, the TV screen on its own and small objects on tables.
 At most ${DETECT_LIMIT}, largest first. Answer with JSON only:
@@ -92,11 +100,13 @@ At most ${DETECT_LIMIT}, largest first. Answer with JSON only:
   {
     "name": "a short name a shopper would use, 2 to 4 words, such as leather corner sofa",
     "kind": "one or two words for the type of piece, such as sofa",
+    "count": 1,
     "box_2d": [ymin, xmin, ymax, xmax],
     "point": [y, x]
   }
 ]
-box_2d is the piece's bounding box and point is a spot on the piece itself that no other piece covers, both on a 0 to 1000 scale from the top-left corner.`
+List matching pieces that stand together once, with count = how many there are (for example 2 bar stools or 6 dining chairs); otherwise count is 1.
+box_2d is the bounding box of the piece (or of the group) and point is a spot on the piece itself that no other piece covers, both on a 0 to 1000 scale from the top-left corner.`
 }
 
 /** Gemini's answer, cleaned: real boxes only, one dot per spot, at most DETECT_LIMIT. */
@@ -136,7 +146,8 @@ export function parseDetected(text: string): DetectedPiece[] {
     }
     // Two dots almost on top of each other can't both be tapped.
     if (out.some((o) => Math.hypot(o.point.x - point.x, o.point.y - point.y) < 0.04)) continue
-    out.push({ id: `p${out.length + 1}`, name, kind, box, point })
+    const count = cleanCount(v.count)
+    out.push({ id: `p${out.length + 1}`, name, kind, box, point, ...(count > 1 ? { count } : {}) })
     if (out.length >= DETECT_LIMIT) break
   }
   return out
@@ -154,7 +165,8 @@ export function readDetected(value: unknown): DetectedPiece[] | null {
     const point = v.point && typeof v.point === "object" ? cleanTapPoint((v.point as any).x, (v.point as any).y) : null
     const id = typeof v.id === "string" && /^p\d{1,2}$/.test(v.id) ? v.id : ""
     if (!name || !box || !point || !id) continue
-    out.push({ id, name, kind: cleanText(v.kind, 30) || name, box, point })
+    const count = cleanCount(v.count)
+    out.push({ id, name, kind: cleanText(v.kind, 30) || name, box, point, ...(count > 1 ? { count } : {}) })
   }
   return out.slice(0, DETECT_LIMIT)
 }

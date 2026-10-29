@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, X } from "lucide-react"
 import { QUOTE_REPLY_PROMISE, canSendQuote, quoteItemsFor, quoteMessage } from "@/lib/design/quote"
+import { estimateFor, estimateQuoteLine } from "@/lib/design/estimate"
+import type { PriceTier } from "@/lib/design/estimate"
+import type { DetectedPiece } from "@/lib/design/pieceEdit"
 import type { StudioDesign } from "@/lib/design/studioFlow"
 import { quoteRequestLink } from "@/lib/landing"
 import { track } from "@/lib/tracking"
@@ -13,24 +16,42 @@ interface QuoteSheetProps {
   roomName: string
   styleName: string
   projectId: string
-  /** Open with this item ticked and "Specific pieces" chosen, e.g. "piece:<id>". */
-  preselect?: string | null
+  /** Open with these items ticked and "Specific pieces" chosen, e.g. "piece:<id>" or ["found:p1", …]. */
+  preselect?: string | string[] | null
+  /** The pieces found in the design, and the tier, for the estimate line. */
+  found?: DetectedPiece[]
+  tier?: PriceTier
   /** The room's budget line for the request (lib/design/budget.ts), if one was picked. */
   budgetLine?: string | null
   onClose: () => void
 }
 
 /** "Get a quote": the whole room, or chosen pieces. Sends one message to us. */
-export default function QuoteSheet({ open, design, roomName, styleName, projectId, preselect, budgetLine, onClose }: QuoteSheetProps) {
+export default function QuoteSheet({
+  open,
+  design,
+  roomName,
+  styleName,
+  projectId,
+  preselect,
+  found = [],
+  tier = "mid",
+  budgetLine,
+  onClose,
+}: QuoteSheetProps) {
   const [wholeRoom, setWholeRoom] = useState(true)
   const [ticked, setTicked] = useState<string[]>([])
   const [other, setOther] = useState("")
   const headingRef = useRef<HTMLHeadingElement>(null)
 
+  const preselected = preselect ? (Array.isArray(preselect) ? preselect : [preselect]) : []
+  const preselectKey = preselected.join(",")
+
   useEffect(() => {
     if (!open) return
-    setWholeRoom(!preselect)
-    setTicked(preselect ? [preselect] : [])
+    const chosen = preselectKey ? preselectKey.split(",") : []
+    setWholeRoom(chosen.length === 0)
+    setTicked(chosen)
     setOther("")
     headingRef.current?.focus()
     track("quote_opened", projectId)
@@ -39,13 +60,32 @@ export default function QuoteSheet({ open, design, roomName, styleName, projectI
     return () => {
       document.body.style.overflow = previous
     }
-  }, [open, preselect, projectId])
+  }, [open, preselectKey, projectId])
 
   if (!open || !design) return null
 
-  const items = quoteItemsFor(design)
+  const items = quoteItemsFor(design, found)
   const chosen = items.filter((item) => ticked.includes(item.id))
-  const request = { roomName, styleName, designUrl: design.imageUrl, wholeRoom, items: chosen, other, budget: budgetLine ?? null }
+  // Our estimate for what is asked: every piece found, or the ticked ones.
+  const chosenFound = found.filter((piece) => ticked.includes(`found:${piece.id}`))
+  const estimateLine =
+    found.length === 0
+      ? null
+      : wholeRoom
+        ? estimateQuoteLine(estimateFor(found, tier), tier)
+        : chosenFound.length > 0
+          ? estimateQuoteLine(estimateFor(chosenFound, tier), tier)
+          : null
+  const request = {
+    roomName,
+    styleName,
+    designUrl: design.imageUrl,
+    wholeRoom,
+    items: chosen,
+    other,
+    budget: budgetLine ?? null,
+    estimate: estimateLine,
+  }
   const ready = canSendQuote(request)
   const link = ready ? quoteRequestLink(quoteMessage(request)) : null
 
@@ -109,6 +149,7 @@ export default function QuoteSheet({ open, design, roomName, styleName, projectI
             </p>
           </div>
           {budgetLine && <p className="mt-2.5 text-[13px] font-medium leading-snug text-ks-charcoal">{budgetLine}</p>}
+          {estimateLine && <p className="mt-1 text-[13px] leading-snug text-ks-charcoal">{estimateLine}</p>}
 
           <h3 className="mb-2.5 mt-5 text-[13px] font-semibold leading-normal text-ks-stone">What would you like a quote for?</h3>
           <div role="radiogroup" aria-label="What would you like a quote for?" className="flex flex-col gap-2">
