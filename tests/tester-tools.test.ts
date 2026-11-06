@@ -58,7 +58,7 @@ describe("contact links", () => {
 })
 
 describe("tracking", () => {
-  it("accepts only the five tester actions", () => {
+  it("accepts only the listed tester actions", () => {
     assert.deepEqual([...TRACKED_EVENTS], [
       "app_open",
       "slider_used",
@@ -75,6 +75,7 @@ describe("tracking", () => {
       "piece_moved",
       "piece_removed",
       "estimate_opened",
+      "image_saved",
     ])
     assert.equal(isTrackedEvent("compare_opened"), true)
     assert.equal(isTrackedEvent("drop table"), false)

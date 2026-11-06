@@ -35,6 +35,18 @@ import type { BudgetTier } from "@/lib/design/budget"
 import { readDetected, shortName } from "@/lib/design/pieceEdit"
 import type { DetectedPiece, EditAction } from "@/lib/design/pieceEdit"
 import { track } from "@/lib/tracking"
+import {
+  PENDING_FIRST_POLL_MS,
+  PENDING_POLL_MS,
+  QUICK_FAILURE_MS,
+  isExpired,
+  makePending,
+  newDesignFor,
+  pendingKey,
+  readPending,
+  studioDesignsFrom,
+} from "@/lib/design/pendingDesign"
+import type { PendingDesign } from "@/lib/design/pendingDesign"
 
 export interface DesignStudioProject {
   id: string
@@ -76,6 +88,14 @@ function editTitle(edit: EditPayload): string {
   if (edit.action === "remove") return `Removing the ${name}`
   if (edit.action === "move") return `Moving the ${name}`
   return `Swapping the ${name}`
+}
+
+/** A request kept in the waiting marker (localStorage), read back after coming to the room again. */
+function readRequest(value: unknown): { style: string; opts: GenerateOpts } | null {
+  if (!value || typeof value !== "object") return null
+  const v = value as { style?: unknown; opts?: unknown }
+  if (typeof v.style !== "string" || !v.style || !v.opts || typeof v.opts !== "object") return null
+  return { style: v.style, opts: v.opts as GenerateOpts }
 }
 
 function firstUnusedStyle(designs: StudioDesign[]): string {
@@ -131,6 +151,16 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const busy = useRef(false)
+  // The design being made, also kept in the browser so leaving the page and coming back picks it up.
+  const pendingRef = useRef<PendingDesign | null>(null)
+  // False once this page has been left (in-app navigation keeps the request running).
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   // The last design asked for, so "Try again" after a failure repeats it exactly.
   const lastRequest = useRef<{ style: string; opts: GenerateOpts } | null>(null)
   const closeLightbox = useCallback(() => setLightbox(null), [])
@@ -144,16 +174,136 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     window.scrollTo({ top: 0 })
   }, [])
 
-  // Leaving mid-design would lose sight of it, so ask first.
+  const savePending = useCallback(
+    (pending: PendingDesign | null) => {
+      try {
+        if (pending) window.localStorage.setItem(pendingKey(project.id), JSON.stringify(pending))
+        else window.localStorage.removeItem(pendingKey(project.id))
+      } catch {
+        // Private browsing can refuse storage: then leaving the page just won't pick the design up.
+      }
+    },
+    [project.id]
+  )
+
+  const finishPending = useCallback(() => {
+    pendingRef.current = null
+    busy.current = false
+    savePending(null)
+  }, [savePending])
+
+  /** The stored marker, if it is still the one for this design (a newer design replaces it). */
+  const storedPending = useCallback(
+    (pending: PendingDesign): PendingDesign | null => {
+      let raw: string | null = null
+      try {
+        raw = window.localStorage.getItem(pendingKey(project.id))
+      } catch {
+        return null
+      }
+      const stored = readPending(raw, project.id, Date.now())
+      return stored && stored.startedAt === pending.startedAt ? stored : null
+    },
+    [project.id]
+  )
+
+  // Came back while a design was still being made: wait for it here (tester feedback, 6 Nov).
+  useEffect(() => {
+    let raw: string | null = null
+    try {
+      raw = window.localStorage.getItem(pendingKey(project.id))
+    } catch {
+      return
+    }
+    if (!raw) return
+    const pending = readPending(raw, project.id, Date.now())
+    // Too old or unreadable, or it finished while away (it is already the design on show).
+    if (!pending || newDesignFor(pending, project.designs)) {
+      savePending(null)
+      return
+    }
+    // "Try again" repeats what was asked for, even after leaving the page.
+    const asked = readRequest(pending.request)
+    if (asked) lastRequest.current = asked
+    if (pending.failure) {
+      // It failed after the page was left: show why.
+      savePending(null)
+      setGeneratingStyle(pending.style)
+      setFailure(pending.failure)
+      go("failure")
+      return
+    }
+    pendingRef.current = pending
+    busy.current = true
+    setGeneratingStyle(pending.style)
+    setGeneratingTitle(pending.title)
+    setGeneratingPhoto(null)
+    setStartedAt(pending.startedAt)
+    go("generating")
+    // Runs once, when the room opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // While waiting, look for the finished design on the room. This also catches a reply the
+  // phone dropped (locked screen, another app) and a page reopened mid-design.
   useEffect(() => {
     if (shown !== "generating") return
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = ""
+    let stopped = false
+    const check = async () => {
+      const pending = pendingRef.current
+      if (!pending || stopped) return
+      // A page left earlier may have heard back with a failure and noted it in the marker.
+      const stored = storedPending(pending)
+      if (stored?.failure) {
+        finishPending()
+        setFailure(stored.failure)
+        go("failure")
+        return
+      }
+      if (Date.now() - pending.startedAt < PENDING_FIRST_POLL_MS) return
+      let list: StudioDesign[] | null = null
+      try {
+        const res = await fetch(`/api/projects/${project.id}`, { cache: "no-store" })
+        if (res.ok) {
+          const data = await res.json().catch(() => null)
+          list = studioDesignsFrom(data?.aiDesigns)
+        }
+      } catch {
+        list = null
+      }
+      if (stopped || pendingRef.current !== pending) return
+      const found = list ? newDesignFor(pending, list) : null
+      if (found && list) {
+        const asked = readRequest(pending.request)
+        if (asked?.opts.edit) editRequests.current[found.id] = asked
+        finishPending()
+        setDesigns(list)
+        setCurrentId(found.id)
+        setPicked(firstUnusedStyle(list))
+        go("result")
+        return
+      }
+      if (isExpired(pending, Date.now())) {
+        finishPending()
+        setFailure({
+          kind: "failed",
+          title: "This design did not finish",
+          message: `Your ${styleDisplayName(pending.style)} design did not finish, so nothing was saved. Please try again.`,
+        })
+        go("failure")
+      }
     }
-    window.addEventListener("beforeunload", warn)
-    return () => window.removeEventListener("beforeunload", warn)
-  }, [shown])
+    const timer = window.setInterval(() => void check(), PENDING_POLL_MS)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void check()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [shown, project.id, go, finishPending, storedPending])
 
   /**
    * opts.must: the must-haves to ask for instead of the current picks (Try again on a design).
@@ -185,8 +335,20 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     setStartedAt(Date.now())
     setFailure(null)
     go("generating")
+    const pending = makePending({
+      projectId: project.id,
+      style: styleId,
+      title: opts.edit ? editTitle(opts.edit) : null,
+      designs,
+      now: Date.now(),
+      request: { style: styleId, opts: requestOpts },
+    })
+    pendingRef.current = pending
+    savePending(pending)
 
     let reply: StageRoomReply | null = null
+    // True when the connection itself failed (not an error page or an error reply).
+    let dropped = false
     try {
       const res = await fetch("/api/ai/stage-room", {
         method: "POST",
@@ -216,8 +378,22 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
       reply = (await res.json().catch(() => null)) as StageRoomReply | null
     } catch {
       reply = null
+      dropped = true
     }
-    busy.current = false
+    // The check below already showed the design, or the wait was given up.
+    if (pendingRef.current !== pending) return
+    if (!mounted.current) {
+      // The page was left. Its next visit finds a finished design on the room; a failure is
+      // noted in the marker so that visit can say why. A newer design's marker is left alone.
+      if (reply && reply.success !== true && storedPending(pending)) {
+        savePending({ ...pending, failure: describeFailure(reply, styleDisplayName(styleId)) })
+      }
+      return
+    }
+    // The connection dropped after the request went out (often a phone locking or switching
+    // apps). The design is probably still coming: keep waiting and let the check find it.
+    if (dropped && Date.now() - pending.startedAt > QUICK_FAILURE_MS) return
+    finishPending()
 
     const design = designFromReply(reply, { style: styleId, sourceImageUrl: photoUrl, now: new Date() })
     if (design) {
@@ -360,18 +536,14 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   return (
     <div className="mx-auto max-w-6xl font-sans text-ks-ink">
       <header className="-mx-4 -mt-4 mb-5 flex h-14 items-center gap-2 border-b border-ks-line bg-white px-3 sm:mx-0 sm:mt-0 sm:rounded-2xl sm:border">
-        {shown !== "generating" ? (
-          <button
-            type="button"
-            onClick={back}
-            aria-label={backLabel}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-ks-charcoal outline-none hover:bg-ks-paper focus-visible:ring-2 focus-visible:ring-ks-charcoal"
-          >
-            <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={1.8} aria-hidden="true" />
-          </button>
-        ) : (
-          <span className="w-2" />
-        )}
+        <button
+          type="button"
+          onClick={back}
+          aria-label={backLabel}
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-ks-charcoal outline-none hover:bg-ks-paper focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+        >
+          <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={1.8} aria-hidden="true" />
+        </button>
         <p className="min-w-0 flex-1 truncate text-[16px] font-semibold text-ks-ink">
           {shown === "compare" ? "Compare designs" : shown === "change" ? "Change a piece" : project.name}
         </p>
@@ -423,6 +595,9 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           beforeLabel={comparisonFor(current, designs, photoUrl).label}
           previousId={comparisonFor(current, designs, photoUrl).previousId}
           styleName={styleDisplayName(current.style)}
+          roomName={project.name}
+          roomType={project.roomType}
+          onImageSaved={() => track("image_saved", project.id)}
           number={designNumber(designs, current.id)}
           total={designs.length}
           usedStyles={designs.map((d) => d.style)}

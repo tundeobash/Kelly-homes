@@ -9,7 +9,7 @@ import type { BudgetTier } from "@/lib/design/budget"
 import { findMustInclude } from "@/lib/design/mustInclude"
 import { pieceLabel } from "@/lib/design/pieces"
 import type { StudioPiece } from "@/lib/design/pieces"
-import { STUDIO_STYLES } from "@/lib/design/studioStyles"
+import { STUDIO_STYLES, fallBackToDefaultCard, stylesForRoom } from "@/lib/design/studioStyles"
 import type { StudioStyle } from "@/lib/design/studioStyles"
 
 interface StylePickerProps {
@@ -34,9 +34,6 @@ interface StylePickerProps {
   budget: BudgetTier | null
   onBudgetChange: (tier: BudgetTier) => void
 }
-
-const gulfStyles = STUDIO_STYLES.filter((style) => style.gulf)
-const moreStyles = STUDIO_STYLES.filter((style) => !style.gulf)
 
 function StyleCard({
   style,
@@ -65,6 +62,7 @@ function StyleCard({
           src={style.cardImage}
           alt=""
           loading="lazy"
+          onError={(e) => fallBackToDefaultCard(e.currentTarget, style.id)}
           className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
         />
         {selected && (
@@ -103,6 +101,10 @@ export default function StylePicker({
   const [sheetOpen, setSheetOpen] = useState(false)
   const [budgetOpen, setBudgetOpen] = useState(false)
   const pickedStyle = STUDIO_STYLES.find((style) => style.id === picked) ?? null
+  // Card photos that match the room (a bedroom shows bedrooms).
+  const roomStyles = stylesForRoom(roomType)
+  const gulfStyles = roomStyles.filter((style) => style.gulf)
+  const moreStyles = roomStyles.filter((style) => !style.gulf)
   const canDesign = Boolean(photoUrl) && Boolean(pickedStyle) && !uploading
 
   return (

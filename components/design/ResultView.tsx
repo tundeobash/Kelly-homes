@@ -3,6 +3,7 @@
 import { AlertCircle, ArrowLeftRight, Check, ChevronRight, Dot, Plus, Receipt, Undo2 } from "lucide-react"
 import BeforeAfterSlider from "@/components/design/BeforeAfterSlider"
 import EstimateCard from "@/components/design/EstimateCard"
+import SaveImageButton from "@/components/design/SaveImageButton"
 import type { BudgetTier } from "@/lib/design/budget"
 import type { Estimate, PriceTier } from "@/lib/design/estimate"
 import { editDetail, editHeadline, editMissedMessage } from "@/lib/design/pieceEdit"
@@ -10,7 +11,7 @@ import { missingMessage } from "@/lib/design/mustInclude"
 import { contactLinks } from "@/lib/landing"
 import { pieceLabel } from "@/lib/design/pieces"
 import { QUOTE_REPLY_PROMISE } from "@/lib/design/quote"
-import { STUDIO_STYLES, findStudioStyle } from "@/lib/design/studioStyles"
+import { fallBackToDefaultCard, findStudioStyle, stylesForRoom } from "@/lib/design/studioStyles"
 import type { StudioDesign } from "@/lib/design/studioFlow"
 
 interface ResultViewProps {
@@ -21,6 +22,12 @@ interface ResultViewProps {
   /** The design a changed piece was made from, while it is still kept. */
   previousId?: string | null
   styleName: string
+  /** The room's name, for the saved image's file name. */
+  roomName: string
+  /** The room's type, so "Try next" shows matching card photos. */
+  roomType?: string
+  /** Called when the design image was saved to the phone or computer. */
+  onImageSaved?: () => void
   number: number
   total: number
   usedStyles: string[]
@@ -57,6 +64,9 @@ export default function ResultView({
   beforeLabel = "Before",
   previousId = null,
   styleName,
+  roomName,
+  roomType,
+  onImageSaved,
   number,
   total,
   usedStyles,
@@ -82,7 +92,7 @@ export default function ResultView({
   const editMissed = edit ? editMissedMessage(edit) : null
   const feedback = contactLinks().feedback
   const used = new Set(usedStyles.map((style) => findStudioStyle(style)?.id ?? style))
-  const nextStyles = STUDIO_STYLES.filter((style) => !used.has(style.id)).slice(0, 6)
+  const nextStyles = stylesForRoom(roomType).filter((style) => !used.has(style.id)).slice(0, 6)
   const asked = design.mustInclude ?? []
   const shownPieces = asked.filter((r) => r.included !== false)
   const piece = design.piece ?? null
@@ -104,14 +114,12 @@ export default function ResultView({
       />
 
       <div className="pb-28 lg:pb-0">
-        <div className="mt-4 flex items-baseline justify-between gap-3 lg:mt-2">
-          <h1 className="font-serif text-[24px] font-semibold leading-tight text-ks-ink lg:text-[34px]">{styleName}</h1>
-          <p className="whitespace-nowrap text-[13px] text-ks-stone">
-            Design {number} of {total}
-          </p>
+        <div className="mt-4 flex items-center justify-between gap-3 lg:mt-2">
+          <h1 className="min-w-0 font-serif text-[24px] font-semibold leading-tight text-ks-ink lg:text-[34px]">{styleName}</h1>
+          <SaveImageButton imageUrl={design.imageUrl} roomName={roomName} styleName={styleName} onSaved={onImageSaved} />
         </div>
         <p className="mt-1.5 text-[13px] leading-normal text-ks-stone">
-          Walls, windows and doors come from your photo. Furniture and decor are imagined by AI.
+          Design {number} of {total}. Walls, windows and doors come from your photo. Furniture and decor are imagined by AI.
         </p>
         <EstimateCard
           estimate={estimate}
@@ -341,6 +349,7 @@ export default function ResultView({
                     src={style.cardImage}
                     alt=""
                     loading="lazy"
+                    onError={(e) => fallBackToDefaultCard(e.currentTarget, style.id)}
                     className="aspect-[4/3] w-full rounded-[10px] object-cover transition-opacity duration-150 group-hover:opacity-90 group-focus-visible:ring-2 group-focus-visible:ring-ks-charcoal"
                   />
                   <span className="mt-1.5 block text-[13px] font-semibold leading-snug text-ks-ink">{style.name}</span>

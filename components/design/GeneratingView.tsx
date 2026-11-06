@@ -92,7 +92,7 @@ export default function GeneratingView({ photoUrl, styleName, roomLabel, roomNam
         </ol>
 
         <p className="mt-8 text-center text-[13px] leading-normal text-ks-stone lg:text-left">
-          Keep this page open. Your design saves to {roomName} when it is ready.
+          You can leave this page. Your design keeps going and saves to {roomName} when it is ready.
         </p>
       </div>
     </div>

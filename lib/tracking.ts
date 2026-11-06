@@ -19,6 +19,7 @@ export const TRACKED_EVENTS = [
   "piece_moved", // asked to move a piece
   "piece_removed", // asked to remove a piece
   "estimate_opened", // opened "What's in this design" from the estimate
+  "image_saved", // saved a design image to the phone or computer (7 Nov 2026)
 ] as const
 
 export type TrackedEvent = (typeof TRACKED_EVENTS)[number]

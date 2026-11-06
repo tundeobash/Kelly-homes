@@ -17,8 +17,27 @@ export interface StudioStyle {
   gulf: boolean
 }
 
-export function styleCardImage(id: string): string {
-  return `/images/styles/cards/${id}.jpg`
+/**
+ * Room types with their own card photos, in public/images/styles/cards/<folder>/<style>.jpg
+ * (tester feedback 6 Nov 2026: a bedroom showed living-room pictures). Other rooms use the
+ * living-room cards. Made with scripts/make-style-cards.mjs.
+ */
+export const ROOM_CARD_FOLDERS = ["bedroom", "dining-room", "office"] as const
+
+/** Which card folder a room uses. Mirrors normalizeRoomType (lib/ai/roomFurnishing.ts), kept here for the browser. */
+export function cardFolderFor(roomType: string | null | undefined): string | null {
+  const text = (roomType || "").trim().toLowerCase()
+  if (!text) return null
+  if (text.includes("bed")) return "bedroom"
+  if ((text.includes("living") || text.includes("lounge")) && text.includes("dining")) return null
+  if (text.includes("dining")) return "dining-room"
+  if (text.includes("office") || text.includes("study")) return "office"
+  return null
+}
+
+export function styleCardImage(id: string, roomType?: string | null): string {
+  const folder = cardFolderFor(roomType)
+  return folder ? `/images/styles/cards/${folder}/${id}.jpg` : `/images/styles/cards/${id}.jpg`
 }
 
 function tagline(tags: string[]): string {
@@ -43,6 +62,18 @@ export const STUDIO_STYLES: StudioStyle[] = [
   ),
   ...ALL_STYLES.filter((style) => !style.gulf),
 ]
+
+/** If a room's own card photo is missing, show the living-room one instead of a broken image. */
+export function fallBackToDefaultCard(img: HTMLImageElement, styleId: string): void {
+  const fallback = styleCardImage(styleId)
+  if (!img.src.endsWith(fallback)) img.src = fallback
+}
+
+/** The styles with card photos that match the room, in the same order. */
+export function stylesForRoom(roomType: string | null | undefined): StudioStyle[] {
+  if (!cardFolderFor(roomType)) return STUDIO_STYLES
+  return STUDIO_STYLES.map((style) => ({ ...style, cardImage: styleCardImage(style.id, roomType) }))
+}
 
 function styleKey(value: string): string {
   return value.trim().toLowerCase().replace(/[\s_]+/g, "-")
