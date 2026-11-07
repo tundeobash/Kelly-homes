@@ -61,10 +61,11 @@ export const PRICE_KINDS: PriceKind[] = [
   { id: "plant", match: /plant|tree|palm|olive|fern|monstera|ficus|bonsai|greenery/, price: { affordable: [108, 175], mid: [469, 1295], premium: null } },
   // Mid has only two products (and costs more than premium bookcases): priced in the quote.
   { id: "shelving", match: /bookcase|bookshelf|book shelf|shelving|shelf|shelves|etagere|display unit|wall unit/, price: { affordable: [218, 730], mid: null, premium: [1959, 3899] } },
+  // Before bed, so an end-of-bed bench is priced as a bench, not a bed (bug found 29 Oct).
+  { id: "bench", match: /bench/, price: { affordable: [287, 622], mid: [1695, 3232], premium: [3556, 4212] } },
   // Listed range for affordable (no percentiles taken).
   { id: "bed", match: /\bbeds?\b|bed frame|headboard/, price: { affordable: [545, 3495], mid: [4640, 6720], premium: [5424, 9206] } },
   { id: "desk", match: /\bdesk\b|writing table|workstation/, price: { affordable: [422, 1030], mid: null, premium: [5084, 7970] } },
-  { id: "bench", match: /bench/, price: { affordable: [287, 622], mid: [1695, 3232], premium: [3556, 4212] } },
   { id: "chair", match: /\bchairs?\b/, price: { affordable: [295, 995], mid: [2595, 3568], premium: [6529, 10465] } },
 ]
 

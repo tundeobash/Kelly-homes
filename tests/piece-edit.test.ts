@@ -84,6 +84,10 @@ describe("finding pieces", () => {
     assert.match(buildDetectPrompt(), /count = how many there are/)
   })
 
+  it("counts curtains once per window, not per panel", () => {
+    assert.match(buildDetectPrompt(), /curtains and blinds, count the windows, not the panels/)
+  })
+
   it("reads stored pieces back", () => {
     const stored = parseDetected(JSON.stringify([{ name: "pouf", kind: "pouf", box_2d: [560, 670, 670, 850], point: [610, 760] }]))
     assert.deepEqual(readDetected(JSON.parse(JSON.stringify(stored))), stored)

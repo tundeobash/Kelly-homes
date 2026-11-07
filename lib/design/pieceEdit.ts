@@ -106,6 +106,7 @@ At most ${DETECT_LIMIT}, largest first. Answer with JSON only:
   }
 ]
 List matching pieces that stand together once, with count = how many there are (for example 2 bar stools or 6 dining chairs); otherwise count is 1.
+For curtains and blinds, count the windows, not the panels: the curtains on one window are count 1, however many panels they have.
 box_2d is the bounding box of the piece (or of the group) and point is a spot on the piece itself that no other piece covers, both on a 0 to 1000 scale from the top-left corner.`
 }
 
