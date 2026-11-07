@@ -76,6 +76,8 @@ describe("tracking", () => {
       "piece_removed",
       "estimate_opened",
       "image_saved",
+      "quote_home_opened",
+      "quote_home_sent",
     ])
     assert.equal(isTrackedEvent("compare_opened"), true)
     assert.equal(isTrackedEvent("drop table"), false)

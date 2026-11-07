@@ -20,6 +20,8 @@ export const TRACKED_EVENTS = [
   "piece_removed", // asked to remove a piece
   "estimate_opened", // opened "What's in this design" from the estimate
   "image_saved", // saved a design image to the phone or computer (7 Nov 2026)
+  "quote_home_opened", // opened "Get a quote for my home" (7 Nov 2026)
+  "quote_home_sent", // sent a quote request for the whole home
 ] as const
 
 export type TrackedEvent = (typeof TRACKED_EVENTS)[number]

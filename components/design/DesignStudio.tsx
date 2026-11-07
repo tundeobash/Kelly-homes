@@ -61,6 +61,8 @@ export interface DesignStudioProject {
   budget?: BudgetTier | null
   /** Newest first, as stored. */
   designs: StudioDesign[]
+  /** How many of the person's other rooms have designs, for "Get a quote for my home". */
+  otherRoomsWithDesigns?: number
 }
 
 type View = "choose" | "generating" | "result" | "compare" | "failure" | "change"
@@ -711,6 +713,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
         found={currentPieces ?? []}
         tier={tier}
         budgetLine={budgetQuoteLine(project.roomType, budget)}
+        homeRoomCount={(project.otherRoomsWithDesigns ?? 0) + (designs.length > 0 ? 1 : 0)}
         onClose={() => setQuote(null)}
       />
 

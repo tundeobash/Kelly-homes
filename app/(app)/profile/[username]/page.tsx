@@ -7,14 +7,19 @@ import { normalizeProject } from "@/lib/api/normalize-project"
 import { roomCover, roomMeta } from "@/lib/rooms"
 import { styleDisplayName } from "@/lib/design/studioStyles"
 import RoomCard from "@/components/RoomCard"
+import YourHome from "@/components/HomeQuote"
+import { cleanBudget } from "@/lib/design/budget"
+import type { HomeRoom } from "@/lib/design/homeQuote"
 
 type PageProps = {
   params: Promise<{ username: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
 /** "Your rooms": every room the signed-in person has, newest activity first. */
-export default async function YourRoomsPage({ params }: PageProps) {
+export default async function YourRoomsPage({ params, searchParams }: PageProps) {
   const { username } = await params
+  const { quote } = await searchParams
   const user = await getUserContext()
 
   if (!user) redirect("/auth")
@@ -27,8 +32,22 @@ export default async function YourRoomsPage({ params }: PageProps) {
   })
 
   const now = new Date()
+  // "Get a quote for my home": every room's designs, newest first, with the room's budget.
+  const homeRooms: HomeRoom[] = []
   const rooms = projects.map((project) => {
     const normalized = normalizeProject(project)
+    homeRooms.push({
+      id: normalized.id,
+      name: normalized.name,
+      budget: cleanBudget(normalized.lastAiSettings?.budget),
+      designs: normalized.aiDesigns.map((d) => ({
+        id: d.id,
+        imageUrl: d.imageUrl,
+        style: d.style || "",
+        createdAt: d.createdAt ?? null,
+        detected: d.detected ?? null,
+      })),
+    })
     const summary = {
       roomType: normalized.roomType,
       imageUrl: normalized.imageUrl,
@@ -54,6 +73,8 @@ export default async function YourRoomsPage({ params }: PageProps) {
           <p className="mt-1.5 text-[15px] text-ks-stone">Open a room to design it, try another style or compare.</p>
         </div>
       </div>
+
+      <YourHome rooms={homeRooms} openOnLoad={quote === "home"} />
 
       {rooms.length === 0 ? (
         <section className="mt-6 flex flex-col items-center rounded-2xl border border-dashed border-[#9CA3AF] bg-white px-6 py-12 text-center">

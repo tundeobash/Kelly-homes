@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Check, X } from "lucide-react"
+import Link from "next/link"
+import { Check, ChevronRight, X } from "lucide-react"
 import { QUOTE_REPLY_PROMISE, canSendQuote, quoteItemsFor, quoteMessage } from "@/lib/design/quote"
 import { estimateFor, estimateQuoteLine } from "@/lib/design/estimate"
 import type { PriceTier } from "@/lib/design/estimate"
@@ -23,6 +24,8 @@ interface QuoteSheetProps {
   tier?: PriceTier
   /** The room's budget line for the request (lib/design/budget.ts), if one was picked. */
   budgetLine?: string | null
+  /** Rooms with designs (this one included): from 2, offer one quote for the whole home. */
+  homeRoomCount?: number
   onClose: () => void
 }
 
@@ -37,6 +40,7 @@ export default function QuoteSheet({
   found = [],
   tier = "mid",
   budgetLine,
+  homeRoomCount = 0,
   onClose,
 }: QuoteSheetProps) {
   const [wholeRoom, setWholeRoom] = useState(true)
@@ -178,6 +182,19 @@ export default function QuoteSheet({
                 )
               })}
             </div>
+          )}
+
+          {homeRoomCount >= 2 && (
+            <Link
+              href="/profile/me?quote=home"
+              className="mt-3.5 flex items-center gap-3 rounded-[14px] border border-ks-sand bg-[#FBF8F2] px-3.5 py-3 outline-none transition-colors duration-150 hover:border-ks-gold focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-[15px] font-semibold leading-snug text-ks-ink">Furnishing more than one room?</span>
+                <span className="text-[13px] leading-snug text-[#4B5563]">One quote for your home: {homeRoomCount} rooms</span>
+              </span>
+              <ChevronRight className="h-[18px] w-[18px] flex-shrink-0 text-ks-charcoal" strokeWidth={2} aria-hidden="true" />
+            </Link>
           )}
 
           <label htmlFor="quote-other" className="mt-4 block text-[14px] font-semibold text-ks-ink">

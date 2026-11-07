@@ -29,6 +29,13 @@ export default async function ProjectPage({ params }: PageProps) {
 
   const normalized = normalizeProject(project)
 
+  // For "Get a quote for my home": how many of this person's other rooms have designs.
+  const otherRooms = await prisma.roomProject.findMany({
+    where: { userId: session.user.id, NOT: { id: project.id } },
+    select: { aiDesignsJson: true },
+  })
+  const otherRoomsWithDesigns = otherRooms.filter((room) => Array.isArray(room.aiDesignsJson) && room.aiDesignsJson.length > 0).length
+
   return (
     <DesignStudio
       project={{
@@ -39,6 +46,7 @@ export default async function ProjectPage({ params }: PageProps) {
         mustInclude: cleanMustInclude(normalized.lastAiSettings?.mustInclude),
         pieces: piecesForRoom(normalized.lastAiSettings, (project.aiDesignsJson as unknown[]) || []),
         budget: cleanBudget(normalized.lastAiSettings?.budget),
+        otherRoomsWithDesigns,
         designs: normalized.aiDesigns.map((design) => ({
           id: design.id,
           imageUrl: design.imageUrl,
