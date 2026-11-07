@@ -5,9 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Camera, Check, ChevronLeft, ImagePlus, Loader2, X } from "lucide-react"
 import { ROOM_TYPE_OPTIONS, defaultRoomName } from "@/lib/rooms"
-
-const MAX_PHOTO_BYTES = 10 * 1024 * 1024
-const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"]
+import { PHOTO_ACCEPT, PHOTO_UNREADABLE, PhotoPrepError, preparePhoto, uploadErrorMessage } from "@/lib/photoPrep"
 
 /** Add a room: photo first, then a name and the kind of room, then on to styles. */
 export default function AddRoomPage() {
@@ -28,19 +26,17 @@ export default function AddRoomPage() {
     }
   }, [preview])
 
-  const choosePhoto = (chosen: File | undefined) => {
+  // Big phone photos are made smaller here first (lib/photoPrep.ts), so they upload.
+  const choosePhoto = async (chosen: File | undefined) => {
     if (!chosen) return
-    if (!PHOTO_TYPES.includes(chosen.type)) {
-      setError("Please choose a JPG, PNG or WebP photo.")
-      return
-    }
-    if (chosen.size > MAX_PHOTO_BYTES) {
-      setError("This photo is over 10 MB. Please choose a smaller one.")
-      return
-    }
     setError(null)
-    setFile(chosen)
-    setPreview(URL.createObjectURL(chosen))
+    try {
+      const ready = await preparePhoto(chosen)
+      setFile(ready)
+      setPreview(URL.createObjectURL(ready))
+    } catch (err) {
+      setError(err instanceof PhotoPrepError ? err.message : PHOTO_UNREADABLE)
+    }
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -58,7 +54,7 @@ export default function AddRoomPage() {
       const uploadData = await uploadRes.json().catch(() => ({}))
       const imageUrl: string | undefined = uploadData.url || uploadData.imageUrl
       if (!uploadRes.ok || !imageUrl || imageUrl.startsWith("blob:")) {
-        throw new Error(uploadData.error || "The photo could not be uploaded. Please try again.")
+        throw new Error(uploadErrorMessage(uploadRes.status, uploadData.error))
       }
 
       const createRes = await fetch("/api/projects", {
@@ -91,7 +87,7 @@ export default function AddRoomPage() {
       <input
         ref={fileRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept={PHOTO_ACCEPT}
         className="hidden"
         onChange={(e) => {
           choosePhoto(e.target.files?.[0])
@@ -101,7 +97,7 @@ export default function AddRoomPage() {
       <input
         ref={cameraRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept={PHOTO_ACCEPT}
         capture="environment"
         className="hidden"
         onChange={(e) => {

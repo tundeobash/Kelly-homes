@@ -95,6 +95,9 @@ describe("OpenAI design instruction", () => {
   })
 
   it("keeps doorways and walkways clear and replaces the ceiling light instead of adding one", () => {
+    const leaving = buildOpenAIEditInstruction({ roomType: "living room", style: card("contemporary-majlis"), leaveOut: ["coffee-table", "rug"] })
+    assert.match(leaving, /does not want any of these in the room: a coffee table; a rug or carpet\./)
+    assert.ok(leaving.indexOf("Layout:") < leaving.indexOf("does not want"))
     const text = buildOpenAIEditInstruction({ roomType: "living room", style: card("contemporary-majlis") })
     assert.ok(text.includes(CLEARANCE_RULE))
     assert.ok(text.includes(CEILING_LIGHT_RULE))

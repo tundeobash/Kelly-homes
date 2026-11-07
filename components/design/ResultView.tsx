@@ -8,6 +8,7 @@ import type { BudgetTier } from "@/lib/design/budget"
 import type { Estimate, PriceTier } from "@/lib/design/estimate"
 import { editDetail, editHeadline, editMissedMessage } from "@/lib/design/pieceEdit"
 import { missingMessage } from "@/lib/design/mustInclude"
+import { stillInMessage } from "@/lib/design/leaveOut"
 import { contactLinks } from "@/lib/landing"
 import { pieceLabel } from "@/lib/design/pieces"
 import { QUOTE_REPLY_PROMISE } from "@/lib/design/quote"
@@ -99,6 +100,11 @@ export default function ResultView({
   const pieceShown = piece !== null && design.pieceIncluded !== false
   const missing = missingMessage(asked, piece && design.pieceIncluded === false ? [`your ${piece.name.toLowerCase()}`] : [])
   const unchecked = asked.some((r) => r.included === null) || (piece !== null && design.pieceIncluded == null)
+  // "Leave out": what was kept out, and anything that slipped in anyway.
+  const leaveAsked = design.leaveOut ?? []
+  const keptOut = leaveAsked.filter((r) => r.leftOut !== false)
+  const leaveUnchecked = leaveAsked.some((r) => r.leftOut === null)
+  const problem = [missing, stillInMessage(leaveAsked)].filter(Boolean).join(" ")
 
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-10">
@@ -211,7 +217,7 @@ export default function ResultView({
             </div>
           </section>
         )}
-        {!edit && (asked.length > 0 || piece) && (
+        {!edit && (asked.length > 0 || piece || leaveAsked.length > 0) && (
           <section className="mt-3.5 rounded-2xl border border-ks-line bg-white px-3.5 py-3">
             {(shownPieces.length > 0 || pieceShown) && (
               <>
@@ -256,10 +262,39 @@ export default function ResultView({
                 )}
               </>
             )}
-            {missing && (
-              <div className={`flex items-center gap-2.5 rounded-[10px] bg-[#FBF3E4] px-2.5 py-1.5 ${shownPieces.length > 0 ? "mt-2.5" : ""}`}>
+            {keptOut.length > 0 && (
+              <>
+                <h2
+                  className={`font-sans text-[13px] font-semibold leading-normal text-ks-stone ${
+                    shownPieces.length > 0 || pieceShown ? "mt-2.5" : ""
+                  }`}
+                >
+                  {leaveUnchecked ? "You asked to leave out" : "Left out as you asked"}
+                </h2>
+                <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
+                  {keptOut.map((r) => (
+                    <li key={r.id} className="flex items-center gap-2 text-[15px] font-medium text-ks-ink">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ks-sand text-ks-charcoal">
+                        {r.leftOut ? (
+                          <Check className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />
+                        ) : (
+                          <Dot className="h-4 w-4" aria-hidden="true" />
+                        )}
+                      </span>
+                      No {r.label.toLowerCase().replace(/^tv /, "TV ")}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {problem && (
+              <div
+                className={`flex items-center gap-2.5 rounded-[10px] bg-[#FBF3E4] px-2.5 py-1.5 ${
+                  shownPieces.length > 0 || pieceShown || keptOut.length > 0 ? "mt-2.5" : ""
+                }`}
+              >
                 <AlertCircle className="h-[18px] w-[18px] flex-shrink-0 text-[#92400E]" aria-hidden="true" />
-                <p className="flex-1 text-[14px] leading-snug text-ks-ink">{missing}</p>
+                <p className="flex-1 text-[14px] leading-snug text-ks-ink">{problem}</p>
                 {onRetryMissing && (
                   <button
                     type="button"

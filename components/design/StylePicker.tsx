@@ -1,16 +1,19 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { Check, ChevronRight, ImagePlus, Loader2, Plus, Sofa, Wallet, X } from "lucide-react"
+import { Ban, Check, ChevronRight, ImagePlus, Loader2, Plus, Sofa, Wallet, X } from "lucide-react"
 import MustIncludeSheet from "@/components/design/MustIncludeSheet"
+import LeaveOutSheet from "@/components/design/LeaveOutSheet"
 import BudgetSheet from "@/components/design/BudgetSheet"
 import { budgetSummary } from "@/lib/design/budget"
 import type { BudgetTier } from "@/lib/design/budget"
 import { findMustInclude } from "@/lib/design/mustInclude"
+import { findLeaveOut } from "@/lib/design/leaveOut"
 import { pieceLabel } from "@/lib/design/pieces"
 import type { StudioPiece } from "@/lib/design/pieces"
 import { STUDIO_STYLES, fallBackToDefaultCard, stylesForRoom } from "@/lib/design/studioStyles"
 import type { StudioStyle } from "@/lib/design/studioStyles"
+import { PHOTO_ACCEPT } from "@/lib/photoPrep"
 
 interface StylePickerProps {
   photoUrl: string | null
@@ -26,6 +29,9 @@ interface StylePickerProps {
   /** Must-have piece ids (lib/design/mustInclude.ts). */
   mustInclude: string[]
   onMustIncludeChange: (ids: string[]) => void
+  /** Pieces to leave out (lib/design/leaveOut.ts). */
+  leaveOut: string[]
+  onLeaveOutChange: (ids: string[]) => void
   /** A piece the person loves, for the next design. */
   piece: StudioPiece | null
   onAddPiece: () => void
@@ -90,6 +96,8 @@ export default function StylePicker({
   roomType,
   mustInclude,
   onMustIncludeChange,
+  leaveOut,
+  onLeaveOutChange,
   piece,
   onAddPiece,
   onRemovePiece,
@@ -99,6 +107,7 @@ export default function StylePicker({
   const fileRef = useRef<HTMLInputElement>(null)
   const [noteOpen, setNoteOpen] = useState(note.trim().length > 0)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [leaveOpen, setLeaveOpen] = useState(false)
   const [budgetOpen, setBudgetOpen] = useState(false)
   const pickedStyle = STUDIO_STYLES.find((style) => style.id === picked) ?? null
   // Card photos that match the room (a bedroom shows bedrooms).
@@ -112,7 +121,7 @@ export default function StylePicker({
       <input
         ref={fileRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept={PHOTO_ACCEPT}
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0]
@@ -294,6 +303,56 @@ export default function StylePicker({
             </div>
           </div>
         )}
+        {leaveOut.length === 0 ? (
+          <button
+            type="button"
+            onClick={() => setLeaveOpen(true)}
+            className="mt-2 flex min-h-[56px] w-full items-center gap-3 rounded-xl border border-ks-line bg-ks-paper px-3 py-2 text-left outline-none transition-colors duration-150 hover:border-ks-charcoal focus-visible:ring-2 focus-visible:ring-ks-charcoal"
+          >
+            <span className="flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-[10px] bg-ks-sand text-ks-charcoal">
+              <Ban className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[15px] font-semibold leading-snug text-ks-ink">Leave out</span>
+              <span className="text-[13px] leading-snug text-ks-stone">Furniture you don&apos;t want in this room</span>
+            </span>
+            <ChevronRight className="h-[18px] w-[18px] flex-shrink-0 text-ks-stone" aria-hidden="true" />
+          </button>
+        ) : (
+          <div className="mt-2 rounded-xl border border-ks-line bg-ks-paper px-3 pb-3 pt-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[14px] font-semibold text-ks-ink">Leave out</span>
+              <button
+                type="button"
+                onClick={() => setLeaveOpen(true)}
+                className="flex min-h-[40px] items-center px-1 text-[14px] font-medium text-ks-charcoal underline underline-offset-4"
+              >
+                Edit
+              </button>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {leaveOut.map((id) => {
+                const label = findLeaveOut(id)?.label ?? id
+                return (
+                  <span
+                    key={id}
+                    className="flex h-10 items-center gap-1 rounded-full border border-[#D1D5DB] bg-white pl-3.5 pr-1 text-[14px] font-medium text-ks-charcoal"
+                  >
+                    <span className="text-[14px] font-medium">No {label.toLowerCase().replace(/^tv /, "TV ")}</span>
+                    <button
+                      type="button"
+                      aria-label={`Allow ${label}`}
+                      onClick={() => onLeaveOutChange(leaveOut.filter((x) => x !== id))}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-ks-stone hover:bg-ks-paper"
+                    >
+                      <X className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden="true" />
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setBudgetOpen(true)}
@@ -327,6 +386,14 @@ export default function StylePicker({
         piece={piece}
         onAddPiece={onAddPiece}
         onRemovePiece={onRemovePiece}
+      />
+      <LeaveOutSheet
+        open={leaveOpen}
+        picked={leaveOut}
+        mustInclude={mustInclude}
+        roomType={roomType}
+        onChange={onLeaveOutChange}
+        onClose={() => setLeaveOpen(false)}
       />
       <BudgetSheet
         open={budgetOpen}

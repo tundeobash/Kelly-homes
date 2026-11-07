@@ -5,6 +5,7 @@ import {
 } from "@/lib/ai/generationValidation"
 import { getRoomGuide, normalizeRoomType } from "@/lib/ai/roomFurnishing"
 import { mustIncludeInstruction } from "@/lib/design/mustInclude"
+import { leaveOutInstruction } from "@/lib/design/leaveOut"
 import { aroundPieceLines } from "@/lib/design/pieces"
 import type { StudioPiece } from "@/lib/design/pieces"
 import { sanitizeProviderError } from "@/lib/ai/stabilityRenderer"
@@ -57,6 +58,8 @@ export function buildOpenAIEditInstruction(params: {
   moreFurniture?: boolean
   /** Must-have piece ids (lib/design/mustInclude.ts). */
   mustInclude?: string[]
+  /** Pieces to leave out (lib/design/leaveOut.ts). */
+  leaveOut?: string[]
   /** A piece the customer loves, sent as the second image (lib/design/pieces.ts). */
   piece?: StudioPiece | null
 }): string {
@@ -77,6 +80,7 @@ export function buildOpenAIEditInstruction(params: {
     "Only add furniture, rugs, curtains, lamps, light fittings and decor.",
     known ? `Layout: ${guide.layout}` : "",
     mustIncludeInstruction(params.mustInclude || []),
+    leaveOutInstruction(params.leaveOut || []),
     params.piece ? aroundPieceLines(params.piece) : "",
     params.moreFurniture ? "Furnish generously: include at least six pieces of furniture and decor." : "",
     `${params.style.name} style. ${styleCardText(params.style)} Avoid: ${params.style.avoid}.`,

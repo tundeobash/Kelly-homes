@@ -100,12 +100,21 @@ describe("design replies", () => {
       createdAt: now.toISOString(),
       sourceImageUrl: "https://blob.example/room.jpg",
       mustInclude: [],
+      leaveOut: [],
       piece: null,
       pieceMode: null,
       pieceIncluded: null,
       baseDesignId: null,
       edit: null,
     })
+  })
+
+  it("keeps what was left out", () => {
+    const made = designFromReply(
+      { success: true, imageUrl: "https://blob.example/new.png", designId: "design_2", leaveOut: [{ id: "rug", leftOut: false }] },
+      { style: "japandi", sourceImageUrl: null, now }
+    )
+    assert.deepEqual(made?.leaveOut, [{ id: "rug", label: "Rug", leftOut: false }])
   })
 
   it("treats a reply without a picture as a failure", () => {

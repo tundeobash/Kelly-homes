@@ -10,6 +10,7 @@
 
 import type { StudioDesign, StudioFailure } from "@/lib/design/studioFlow"
 import { readMustIncludeResults } from "@/lib/design/mustInclude"
+import { readLeaveOutResults } from "@/lib/design/leaveOut"
 import { cleanPiece, cleanPieceMode } from "@/lib/design/pieces"
 import { readDesignEdit, readDetected } from "@/lib/design/pieceEdit"
 
@@ -131,6 +132,7 @@ export function studioDesignsFrom(list: unknown): StudioDesign[] {
       createdAt: typeof d.createdAt === "string" ? d.createdAt : null,
       sourceImageUrl: typeof d.sourceImageUrl === "string" && d.sourceImageUrl ? d.sourceImageUrl : null,
       mustInclude: readMustIncludeResults(d.mustInclude),
+      leaveOut: readLeaveOutResults(d.leaveOut),
       piece: cleanPiece(d.piece),
       pieceMode: cleanPieceMode(d.pieceMode),
       pieceIncluded: typeof d.pieceIncluded === "boolean" ? d.pieceIncluded : null,

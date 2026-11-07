@@ -2,6 +2,8 @@ import { existsSync } from "fs"
 import { join } from "path"
 import { readMustIncludeResults } from "@/lib/design/mustInclude"
 import type { MustIncludeResult } from "@/lib/design/mustInclude"
+import { readLeaveOutResults } from "@/lib/design/leaveOut"
+import type { LeaveOutResult } from "@/lib/design/leaveOut"
 import { cleanPiece, cleanPieceMode } from "@/lib/design/pieces"
 import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
 import { readDesignEdit, readDetected } from "@/lib/design/pieceEdit"
@@ -18,6 +20,8 @@ export interface AiDesignImage {
   sourceImageUrl?: string | null
   /** Must-have pieces and whether each made it in (saved from 28 Oct 2026). */
   mustInclude?: MustIncludeResult[]
+  /** Pieces asked to be left out, and whether each was (from 7 Nov 2026). */
+  leaveOut?: LeaveOutResult[]
   /** A piece the person loves, how it was used, and whether it made it in (from 29 Oct 2026). */
   piece?: StudioPiece | null
   pieceMode?: PieceMode | null
@@ -42,6 +46,8 @@ export interface NormalizedProject {
     userPrompt?: string
     /** Must-have piece ids picked for the latest design. */
     mustInclude?: string[]
+    /** Piece ids to leave out, picked for the latest design. */
+    leaveOut?: string[]
     /** The room's budget band (lib/design/budget.ts). */
     budget?: string | null
     updatedAt: string
@@ -90,6 +96,7 @@ export function normalizeProject(project: any): NormalizedProject {
       createdAt: d.createdAt,
       sourceImageUrl: typeof d.sourceImageUrl === "string" ? d.sourceImageUrl : null,
       mustInclude: readMustIncludeResults(d.mustInclude),
+      leaveOut: readLeaveOutResults(d.leaveOut),
       piece: cleanPiece(d.piece),
       pieceMode: cleanPieceMode(d.pieceMode),
       pieceIncluded: typeof d.pieceIncluded === "boolean" ? d.pieceIncluded : null,

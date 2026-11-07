@@ -209,6 +209,8 @@ model DesignGeneration {
   userId    String
   status    String   @default("started")
   provider  String?
+  /// Why the attempt failed (the stage-room errorCode), when it did. Added 7 Nov 2026.
+  errorCode String?
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])

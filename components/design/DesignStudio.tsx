@@ -11,6 +11,7 @@ import type { CompareItem } from "@/components/design/CompareView"
 import FailureView from "@/components/design/FailureView"
 import PieceSheet from "@/components/design/PieceSheet"
 import QuoteSheet from "@/components/design/QuoteSheet"
+import { preparePhoto, uploadErrorMessage } from "@/lib/photoPrep"
 import ChangePieceView from "@/components/design/ChangePieceView"
 import SwapSheet from "@/components/design/SwapSheet"
 import EstimateSheet from "@/components/design/EstimateSheet"
@@ -27,6 +28,7 @@ import {
 import type { StageRoomReply, StudioDesign, StudioFailure } from "@/lib/design/studioFlow"
 import { STUDIO_STYLES, findStudioStyle, styleDisplayName } from "@/lib/design/studioStyles"
 import { picksFromResults } from "@/lib/design/mustInclude"
+import { leaveOutPicks, withoutClashes } from "@/lib/design/leaveOut"
 import { addPiece } from "@/lib/design/pieces"
 import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
 import { budgetQuoteLine } from "@/lib/design/budget"
@@ -55,6 +57,8 @@ export interface DesignStudioProject {
   imageUrl: string | null
   /** Must-have pieces picked for the latest design (lib/design/mustInclude.ts). */
   mustInclude?: string[]
+  /** Pieces to leave out, picked for the latest design (lib/design/leaveOut.ts). */
+  leaveOut?: string[]
   /** The room's pieces the person loves, newest first (lib/design/pieces.ts). */
   pieces?: StudioPiece[]
   /** The room's budget band (lib/design/budget.ts). */
@@ -79,6 +83,7 @@ interface EditPayload {
 
 type GenerateOpts = {
   must?: string[]
+  leave?: string[]
   piece?: StudioPiece | null
   mode?: PieceMode
   baseDesignId?: string | null
@@ -119,6 +124,16 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
   const [picked, setPicked] = useState<string>(() => firstUnusedStyle(project.designs))
   const [note, setNote] = useState("")
   const [mustInclude, setMustInclude] = useState<string[]>(project.mustInclude ?? [])
+  const [leaveOut, setLeaveOut] = useState<string[]>(project.leaveOut ?? [])
+  // A piece can't be on both lists: the list just changed wins.
+  const changeMustInclude = (ids: string[]) => {
+    setMustInclude(ids)
+    setLeaveOut((current) => withoutClashes(current, ids))
+  }
+  const changeLeaveOut = (ids: string[]) => {
+    setLeaveOut(ids)
+    setMustInclude((current) => withoutClashes(current, ids))
+  }
   // A piece for the next design ("around" mode), the room's pieces, and which piece sheet is open.
   const [piece, setPiece] = useState<StudioPiece | null>(null)
   const [pieces, setPieces] = useState<StudioPiece[]>(project.pieces ?? [])
@@ -317,6 +332,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     const mode: PieceMode | undefined = usePiece && !opts.edit ? opts.mode ?? "around" : undefined
     const requestOpts: GenerateOpts = {
       must: opts.must ?? mustInclude,
+      leave: opts.leave ?? leaveOut,
       piece: usePiece ?? null,
       mode,
       baseDesignId: opts.baseDesignId ?? null,
@@ -362,6 +378,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           roomType: project.roomType || undefined,
           prompt: note.trim() || undefined,
           mustInclude: opts.edit ? [] : opts.must ?? mustInclude,
+          leaveOut: opts.edit ? [] : opts.leave ?? leaveOut,
           piece: usePiece || undefined,
           pieceMode: mode,
           baseDesignId: mode === "place" ? opts.baseDesignId || undefined : undefined,
@@ -415,13 +432,14 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
     setUploading(true)
     setUploadError(null)
     try {
-      if (file.size > 10 * 1024 * 1024) throw new Error("This photo is over 10 MB. Please choose a smaller one.")
+      // Big phone photos are made smaller first (lib/photoPrep.ts), so they upload.
+      const ready = await preparePhoto(file)
       const form = new FormData()
-      form.append("file", file)
+      form.append("file", ready)
       form.append("projectId", project.id)
       const uploadRes = await fetch("/api/upload", { method: "POST", body: form })
       const uploadData = await uploadRes.json().catch(() => ({}))
-      if (!uploadRes.ok) throw new Error(uploadData.error || "The photo could not be uploaded. Please try again.")
+      if (!uploadRes.ok) throw new Error(uploadErrorMessage(uploadRes.status, uploadData.error))
       const url: string | undefined = uploadData.url || uploadData.imageUrl
       if (!url) throw new Error("The photo could not be uploaded. Please try again.")
       const saveRes = await fetch(`/api/projects/${project.id}`, {
@@ -570,7 +588,9 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           uploadError={uploadError}
           roomType={project.roomType}
           mustInclude={mustInclude}
-          onMustIncludeChange={setMustInclude}
+          onMustIncludeChange={changeMustInclude}
+          leaveOut={leaveOut}
+          onLeaveOutChange={changeLeaveOut}
           piece={piece}
           onAddPiece={() => setPieceSheet("around")}
           onRemovePiece={() => setPiece(null)}
@@ -617,6 +637,7 @@ export default function DesignStudio({ project }: { project: DesignStudioProject
           onRetryMissing={() =>
             generate(current.style, {
               must: picksFromResults(current.mustInclude, project.roomType),
+              leave: leaveOutPicks(current.leaveOut),
               piece: current.piece ?? null,
               mode: current.pieceMode ?? undefined,
               baseDesignId: current.baseDesignId ?? null,

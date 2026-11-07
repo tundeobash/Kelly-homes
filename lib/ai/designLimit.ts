@@ -86,12 +86,14 @@ export async function reserveDesignAttempt(input: {
 export async function finishDesignAttempt(
   attemptId: string,
   status: "completed" | "failed",
-  requestId: string
+  requestId: string,
+  /** Why it failed (the response's errorCode), when it did. */
+  errorCode: string | null = null
 ): Promise<void> {
   try {
     await prisma.designGeneration.updateMany({
       where: { id: attemptId, status: "started" },
-      data: { status },
+      data: { status, ...(errorCode ? { errorCode: errorCode.slice(0, 40) } : {}) },
     })
   } catch (error) {
     console.error(`[${requestId}] Could not record design attempt result`, {

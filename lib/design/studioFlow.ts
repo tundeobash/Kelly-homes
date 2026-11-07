@@ -4,6 +4,8 @@
 
 import { readMustIncludeResults } from "@/lib/design/mustInclude"
 import type { MustIncludeResult } from "@/lib/design/mustInclude"
+import { readLeaveOutResults } from "@/lib/design/leaveOut"
+import type { LeaveOutResult } from "@/lib/design/leaveOut"
 import { cleanPiece, cleanPieceMode } from "@/lib/design/pieces"
 import type { PieceMode, StudioPiece } from "@/lib/design/pieces"
 import { readDesignEdit } from "@/lib/design/pieceEdit"
@@ -46,6 +48,8 @@ export interface StudioDesign {
   sourceImageUrl?: string | null
   /** Must-have pieces asked for, and whether each made it in. Older designs have none. */
   mustInclude?: MustIncludeResult[]
+  /** Pieces asked to be left out, and whether each was. Older designs have none. */
+  leaveOut?: LeaveOutResult[]
   /** A piece the person loves in this design, how it was used, and whether the check saw it. */
   piece?: StudioPiece | null
   pieceMode?: PieceMode | null
@@ -68,6 +72,7 @@ export interface StageRoomReply {
   errorCode?: string
   requestId?: string
   mustInclude?: unknown
+  leaveOut?: unknown
   piece?: unknown
   pieceMode?: unknown
   pieceIncluded?: unknown
@@ -151,6 +156,7 @@ export function designFromReply(
     createdAt: input.now.toISOString(),
     sourceImageUrl: typeof reply.sourceImageUrl === "string" && reply.sourceImageUrl ? reply.sourceImageUrl : input.sourceImageUrl,
     mustInclude: readMustIncludeResults(reply.mustInclude),
+    leaveOut: readLeaveOutResults(reply.leaveOut),
     piece: cleanPiece(reply.piece),
     pieceMode: cleanPieceMode(reply.pieceMode),
     pieceIncluded: typeof reply.pieceIncluded === "boolean" ? reply.pieceIncluded : null,

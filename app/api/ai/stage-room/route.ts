@@ -28,6 +28,7 @@ import {
   piecesToCheck,
   uncheckedMustIncludes,
 } from "@/lib/design/mustInclude"
+import { checkLeaveOuts, cleanLeaveOut, leaveOutCheckName, uncheckedLeaveOuts } from "@/lib/design/leaveOut"
 import {
   addPiece,
   cleanPiece,
@@ -583,13 +584,19 @@ export async function POST(request: Request) {
   let designAttemptId: string | null = null
   let designReachedProvider = false
   let providerHttpStatus: number | null = null
+  // Why the attempt failed, saved with it (7 Nov 2026: 4 of a tester's designs were lost and nothing said why).
+  let failureCode: string | null = null
+  const respond = (body: Record<string, unknown>, init?: ResponseInit) => {
+    if (body.success === false) failureCode = typeof body.errorCode === "string" ? body.errorCode : "UNKNOWN"
+    return NextResponse.json(body, init)
+  }
 
   try {
     // Get user context
     const userContext = await getUserContext()
     if (!userContext) {
       console.error(`[${requestId}] Unauthorized: No user context`)
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: "Unauthorized. Please sign in.",
@@ -609,7 +616,7 @@ export async function POST(request: Request) {
       body = await request.json()
     } catch (error) {
       console.error(`[${requestId}] Invalid JSON body:`, error)
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: "Invalid request body",
@@ -624,6 +631,8 @@ export async function POST(request: Request) {
     const { projectId, imageUrl: providedImageUrl, style, prompt, moreFurniture, roomType: requestedRoomType } = body
     // Must-have pieces the person picked (at most 3, known ids only).
     const pickedMustInclude = cleanMustInclude(body?.mustInclude)
+    // Pieces not wanted (lib/design/leaveOut.ts); a piece on both lists is left out.
+    const pickedLeaveOut = cleanLeaveOut(body?.leaveOut)
     // "Change a piece": swap, move or remove one piece of an existing design (item 7).
     const edit = cleanEditRequest(body?.edit)
     // A piece the person loves: "around" builds a new design around it; "place" adds it to an existing design.
@@ -668,7 +677,7 @@ export async function POST(request: Request) {
     // Validate required fields
     if (!style || typeof style !== "string" || style.trim() === "") {
       console.error(`[${requestId}] Missing or invalid style`)
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: "Style is required",
@@ -682,7 +691,7 @@ export async function POST(request: Request) {
 
     if (!styleCard) {
       console.error(`[${requestId}] Unknown style: ${styleKey}`)
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: "That style isn't available. Please choose another style.",
@@ -753,7 +762,7 @@ export async function POST(request: Request) {
 
         if (!project) {
           console.error(`[${requestId}] Project not found: ${projectId}`)
-          return NextResponse.json(
+          return respond(
             {
               success: false,
               errorMessage: "Project not found",
@@ -767,7 +776,7 @@ export async function POST(request: Request) {
 
         if (project.userId !== userId) {
           console.error(`[${requestId}] Unauthorized access to project: ${projectId}`)
-          return NextResponse.json(
+          return respond(
             {
               success: false,
               errorMessage: "Unauthorized access to project",
@@ -782,7 +791,7 @@ export async function POST(request: Request) {
         imageUrl = project.imageUrl
       } catch (error: any) {
         console.error(`[${requestId}] Error fetching project:`, error)
-        return NextResponse.json(
+        return respond(
           {
             success: false,
             errorMessage: "Failed to fetch project",
@@ -798,7 +807,7 @@ export async function POST(request: Request) {
     // Validate image URL
     if (!imageUrl || imageUrl.trim() === "" || imageUrl.startsWith("blob:")) {
       console.error(`[${requestId}] Missing or invalid imageUrl: ${imageUrl}`)
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: "Room photo is required. Please upload a room photo first.",
@@ -817,7 +826,7 @@ export async function POST(request: Request) {
       const designs: any[] = Array.isArray(project?.aiDesignsJson) ? (project.aiDesignsJson as any[]) : []
       const base = designs.find((d) => d && typeof d === "object" && d.id === baseDesignId)
       if (!base || typeof base.imageUrl !== "string" || !isAllowedImageUrl(base.imageUrl)) {
-        return NextResponse.json(
+        return respond(
           {
             success: false,
             errorMessage: edit
@@ -840,7 +849,12 @@ export async function POST(request: Request) {
     })
     // What to ask for and check: the picks, plus a dining table for a living and dining room.
     // Adding a piece to an existing design asks for nothing else.
-    const mustIncludeIds = pieceMode === "place" || edit ? [] : piecesToCheck(pickedMustInclude, resolvedRoomType)
+    const mustIncludeIds =
+      pieceMode === "place" || edit
+        ? []
+        : piecesToCheck(pickedMustInclude.filter((id) => !pickedLeaveOut.includes(id)), resolvedRoomType)
+    // A living and dining room always gets its dining table, so that one can't be left out.
+    const leaveOutIds = pieceMode === "place" || edit ? [] : pickedLeaveOut.filter((id) => !mustIncludeIds.includes(id))
 
     console.log(`[${requestId}] Room type received`, {
       fromRequest: typeof requestedRoomType === "string" && requestedRoomType.trim()
@@ -899,7 +913,7 @@ export async function POST(request: Request) {
         status: null,
         error: providerDecision.errorMessage,
       })
-      return NextResponse.json({
+      return respond({
         success: false,
         errorMessage: providerDecision.errorMessage,
         errorCode: providerDecision.errorCode,
@@ -914,7 +928,7 @@ export async function POST(request: Request) {
 
     // Changing one piece needs the OpenAI image editor.
     if (edit && selectedProvider !== "openai") {
-      return NextResponse.json({
+      return respond({
         success: false,
         errorMessage: "Changing a piece isn't available right now. Please try again later.",
         errorCode: "EDIT_UNAVAILABLE",
@@ -926,7 +940,7 @@ export async function POST(request: Request) {
     // Daily design limit: record this attempt before any paid work starts.
     const allowance = await reserveDesignAttempt({ userId, provider: selectedProvider, requestId })
     if (!allowance.allowed) {
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: allowance.message,
@@ -974,7 +988,7 @@ export async function POST(request: Request) {
       })
     } catch (error: any) {
       console.error(`[${requestId}] Failed to load image:`, error)
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: `Failed to load image: ${error.message || "Unknown error"}`,
@@ -998,7 +1012,7 @@ export async function POST(request: Request) {
       inputHash = createHash("sha256").update(imageBuffer).digest("hex")
     } catch (error: any) {
       console.error(`[${requestId}] Failed to normalize image:`, error)
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: `Failed to process image: ${error.message || "Unknown error"}`,
@@ -1021,7 +1035,7 @@ export async function POST(request: Request) {
         console.error(`[${requestId}] Could not load the piece photo`, {
           error: error instanceof Error ? error.message : String(error),
         })
-        return NextResponse.json({
+        return respond({
           success: false,
           errorMessage: "We couldn't load your piece's photo. Please add it again.",
           errorCode: "PIECE_LOAD_FAILED",
@@ -1041,7 +1055,7 @@ export async function POST(request: Request) {
         console.error(`[${requestId}] Could not mark the piece`, {
           error: error instanceof Error ? error.message : String(error),
         })
-        return NextResponse.json({
+        return respond({
           success: false,
           errorMessage: "We couldn't prepare this change. Please try again.",
           errorCode: "EDIT_MARK_FAILED",
@@ -1215,12 +1229,14 @@ export async function POST(request: Request) {
                 userPrompt,
                 moreFurniture: moreFurniture === true,
                 mustInclude: mustIncludeIds,
+                leaveOut: leaveOutIds,
                 piece: requestedPiece,
               })
         console.log(`[${requestId}] OpenAI redesign`, {
           roomType: resolvedRoomType || "unspecified",
           style: styleCard.id,
           mustInclude: mustIncludeIds,
+          leaveOut: leaveOutIds,
           piece: requestedPiece ? `${pieceMode ?? "swap"}:${requestedPiece.name}` : null,
           edit: edit ? `${edit.action}:${edit.target.name}` : null,
           instructionLength: instruction.length,
@@ -1252,7 +1268,7 @@ export async function POST(request: Request) {
         status,
         error: safeMessage,
       })
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: `Image generation failed during ${stageLabel(stage)}. ${safeMessage}`,
@@ -1280,7 +1296,7 @@ export async function POST(request: Request) {
         status: null,
         error: "The image service did not return a design.",
       })
-      return NextResponse.json({
+      return respond({
         success: false,
         errorMessage: "The image service did not return a design. Nothing was saved.",
         errorCode: "NO_IMAGE",
@@ -1307,7 +1323,7 @@ export async function POST(request: Request) {
         status: null,
         error: sanitizeProviderError(message),
       })
-      return NextResponse.json({
+      return respond({
         success: false,
         errorMessage: message,
         errorCode,
@@ -1319,6 +1335,8 @@ export async function POST(request: Request) {
 
     // Whether each must-have piece made it into the design (null when the check does not run).
     let mustIncludeResults = uncheckedMustIncludes(mustIncludeIds)
+    // Whether each unwanted piece was kept out (null when the check does not run).
+    let leaveOutResults = uncheckedLeaveOuts(leaveOutIds)
     let pieceWasIncluded: boolean | null = null
     // For a change: what the check is asked about, and whether the change happened.
     const editCheck = edit ? editCheckName(edit, requestedPiece) : null
@@ -1342,6 +1360,7 @@ export async function POST(request: Request) {
             ? [editCheck]
             : [
                 ...mustIncludeIds.map((id) => findMustInclude(id)?.label || id),
+                ...leaveOutIds.map(leaveOutCheckName),
                 ...(requestedPiece ? [pieceCheckName(requestedPiece)] : []),
               ],
           requestId,
@@ -1349,6 +1368,7 @@ export async function POST(request: Request) {
         // A change may take out the room's main piece (remove the sofa), so only an empty result is refused.
         const furnishing = edit ? assessEditOutput(inspection) : assessRoomOutput(inspection, resolvedRoomType)
         mustIncludeResults = checkMustIncludes(inspection, mustIncludeIds)
+        leaveOutResults = checkLeaveOuts(inspection, leaveOutIds)
         pieceWasIncluded = requestedPiece ? pieceIncluded(inspection, requestedPiece) : null
         if (edit && editCheck) {
           const seen = inspection.mustHave?.[editCheck]
@@ -1361,11 +1381,12 @@ export async function POST(request: Request) {
           looksLike: inspection.looksLike || null,
           furnitureCount: inspection.furniture.length,
           mustInclude: mustIncludeResults.map((r) => `${r.id}:${r.included}`),
+          leaveOut: leaveOutResults.map((r) => `${r.id}:${r.leftOut}`),
           piece: requestedPiece ? `${requestedPiece.name}:${pieceWasIncluded}` : null,
           edit: edit ? `${edit.action}:${editWasDone}` : null,
         })
         if (!furnishing.passed) {
-          return NextResponse.json({
+          return respond({
             success: false,
             errorMessage: furnishing.reason,
             errorCode: furnishing.reason.toLowerCase().includes("empty") ? "EMPTY_ROOM" : "WRONG_ROOM_TYPE",
@@ -1383,7 +1404,7 @@ export async function POST(request: Request) {
           passed: false,
           reason: sanitizeProviderError(message),
         })
-        return NextResponse.json({
+        return respond({
           success: false,
           errorMessage: "The redesign could not be checked for furniture, so it was not saved. Please try again.",
           errorCode: "FURNISHING_CHECK_FAILED",
@@ -1420,7 +1441,7 @@ export async function POST(request: Request) {
         status: null,
         error: safeMessage,
       })
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           errorMessage: `The redesign was created but could not be stored. ${safeMessage}`,
@@ -1457,6 +1478,7 @@ export async function POST(request: Request) {
           model: actualModel,
           createdAt: new Date().toISOString(),
           ...(mustIncludeResults.length > 0 ? { mustInclude: mustIncludeResults } : {}),
+          ...(leaveOutResults.length > 0 ? { leaveOut: leaveOutResults } : {}),
           ...(requestedPiece
             ? {
                 piece: requestedPiece,
@@ -1483,6 +1505,7 @@ export async function POST(request: Request) {
           // Adding a piece to a design, or changing one, keeps the room's Must include picks as they were.
           mustInclude:
             pieceMode === "place" || edit ? cleanMustInclude(previousSettings.mustInclude) : pickedMustInclude,
+          leaveOut: pieceMode === "place" || edit ? cleanLeaveOut(previousSettings.leaveOut) : pickedLeaveOut,
           pieces: requestedPiece ? addPiece(previousPieces, requestedPiece) : previousPieces,
           updatedAt: new Date().toISOString(),
         }
@@ -1515,12 +1538,13 @@ export async function POST(request: Request) {
       designId: savedDesignId,
     })
 
-    return NextResponse.json({
+    return respond({
       success: true,
       images: [generatedImageUrl],
       imageUrl: generatedImageUrl, // Also include as imageUrl for convenience
       designId: savedDesignId, // Include the saved design ID if available
       mustInclude: mustIncludeResults,
+      leaveOut: leaveOutResults,
       piece: requestedPiece,
       pieceMode,
       pieceIncluded: pieceWasIncluded,
@@ -1541,7 +1565,7 @@ export async function POST(request: Request) {
       status: null,
       error: safeMessage,
     })
-    return NextResponse.json(
+    return respond(
       {
         success: false,
         errorMessage: safeMessage,
@@ -1554,7 +1578,7 @@ export async function POST(request: Request) {
   } finally {
     if (designAttemptId) {
       const counts = attemptCounts({ reachedProvider: designReachedProvider, providerHttpStatus })
-      await finishDesignAttempt(designAttemptId, counts ? "completed" : "failed", requestId)
+      await finishDesignAttempt(designAttemptId, counts ? "completed" : "failed", requestId, failureCode)
     }
   }
 }
